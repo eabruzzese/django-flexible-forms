@@ -1,0 +1,27 @@
+# Runtime artifacts.
+__pycache__/
+.mypy_cache/
+
+# Editor artifacts.
+.vscode/
+
+# Testing artifacts.
+.pytest_cache/
+.hypothesis/
+
+# Build artifacts.
+*.egg-info/
+pip-wheel-metadata/
+
+# Coverage report data.
+htmlcov
+.coverage
+
+# File uploads in the test project.
+media/
+
+# Test project daatabase.
+db.sqlite3
+
+# Keep any .gitkeep files.
+!.gitkeep
