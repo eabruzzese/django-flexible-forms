@@ -12,6 +12,7 @@ __pycache__/
 # Build artifacts.
 *.egg-info/
 pip-wheel-metadata/
+dist/
 
 # Coverage report data.
 htmlcov
