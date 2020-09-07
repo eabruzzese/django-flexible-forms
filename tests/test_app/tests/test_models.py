@@ -3,6 +3,7 @@
 """Tests for form-related models."""
 
 from datetime import timedelta
+from flexible_forms.models import BaseFieldModifier
 from typing import Sequence, cast
 
 import pytest
@@ -63,8 +64,64 @@ def test_field() -> None:
     assert isinstance(field.as_form_field(), forms.Field)
 
 
+@pytest.mark.django_db
+def test_field_modifiers() -> None:
+    """Ensure that fields can be dynamically modified based on form inputs."""
+    form = FormFactory(label='Dynamic Form')
+
+    integer_field = FieldFactory(
+        form=form,
+        label='Integer Field',
+        machine_name='integer_field',
+        field_type='INTEGER',
+        required=False
+    )
+
+    dynamic_field = FieldFactory(
+        form=form,
+        label='Dynamic Field',
+        machine_name='dynamic_field',
+        field_type='SINGLE_LINE_TEXT',
+        required=False
+    )
+
+    dynamic_field.field_modifiers.create(
+        attribute_name=BaseFieldModifier.ATTRIBUTE_REQUIRED,
+        expression='integer_field > 1'
+    )
+
+    # When generating the form class with no inputs, the value of the attribute
+    # on the dynamic field should be the value stored in the database.
+    form_class = form.as_form_class()
+    assert form_class.declared_fields['dynamic_field'].required is False
+
+    # When the modifier's expression is not satisfied with the given inputs,
+    # the attribute on the dynamic field should be unchanged.
+    form_class = form.as_form_class(inputs={'integer_field': 1})
+    assert form_class.declared_fields['dynamic_field'].required is False
+
+    # When the modifier's expression is satisfied with the given inputs, the
+    # attribute on the dynamic field should be set to the value returned by the
+    # expression.
+    form_class = form.as_form_class(inputs={'integer_field': 2})
+    assert form_class.declared_fields['dynamic_field'].required is True
+
+    # When the expression is given an input of an incorrect type that is able
+    # to be cast to the correct type (i.e., a string with digits being cast to
+    # an integer), the inputs should be cast before attempting to evaluate the
+    # modifier expression.
+    form_class = form.as_form_class(inputs={'integer_field': '2.0'})
+    assert form_class.declared_fields['dynamic_field'].required is True
+
+    # When the expression is given a completely invalid input that is unable to
+    # be cast, the modifier should have no effect.
+    form_class = form.as_form_class(inputs={'integer_field': 'invalid'})
+    assert form_class.declared_fields['dynamic_field'].required is False
+
+
 @settings(deadline=None, suppress_health_check=(HealthCheck.too_slow,))
 @given(st.data())
+@pytest.mark.timeout(60)
 @pytest.mark.django_db
 def test_record(
     patch_field_strategies: ContextManagerFixture,

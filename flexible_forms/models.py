@@ -2,15 +2,17 @@
 
 """Model definitions for the flexible_forms module."""
 
-from typing import TYPE_CHECKING, Any, Dict, Type, Union
+from collections import defaultdict
+from typing import Mapping, Optional, TYPE_CHECKING, Any, Dict, Tuple, Type, Union
 
 import swapper
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
-from django.forms import Field as DjangoFormField
+from django import forms
 from django.utils.text import slugify
 
 from flexible_forms.fields import FIELDS_BY_KEY, ValueRouter
+from flexible_forms.utils import evaluate_expression
 
 try:
     from django.db.models import JSONField
@@ -70,7 +72,7 @@ class BaseForm(models.Model):
 
         super().save(*args, **kwargs)
 
-    def as_form_class(self) -> Type['RecordForm']:
+    def as_form_class(self, inputs: Optional[Mapping[str, Any]] = None) -> Type['RecordForm']:
         """Return the form represented as a Django Form class.
 
         Returns:
@@ -81,15 +83,33 @@ class BaseForm(models.Model):
 
         class_name = self.machine_name.title().replace('_', '')
         form_class_name = f'{class_name}Form'
+        all_fields = self.fields.all()
 
-        # Dynamically define a Django Form class using the fields associated
-        # with the Form object.
-        form_attrs: Dict[str, Union[str, DjangoFormField]] = {
-            '__module__': self.__module__,
-            **{
-                f.machine_name: f.as_form_field()
-                for f in self.fields.all()
+        # Generate the initial list of form fields.
+        form_fields = {
+            f.machine_name: f.as_form_field() for f in all_fields
+        }
+
+        # If any inputs were given, we run them through the to_python method of
+        # their corresponding form field (to get a clean Python value), then we
+        # regenerate the form fields dict using the cleaned inputs to inform
+        # dynamic behavior.
+        if inputs:
+            for field, value in inputs.items():
+                try:
+                    inputs[field] = form_fields[field].to_python(value)
+                except BaseException as ex:
+                    # TODO: Error handling.
+                    pass
+
+            form_fields = {
+                f.machine_name: f.as_form_field(inputs=inputs) for f in all_fields
             }
+
+        # Dynamically generate a form class containing all of the fields.
+        form_attrs: Mapping[str, Union[str, forms.Field]] = {
+            '__module__': self.__module__,
+            **form_fields
         }
 
         return type(form_class_name, (RecordForm,), form_attrs)
@@ -205,34 +225,67 @@ class BaseField(models.Model):
 
         super().save(*args, **kwargs)
 
-    def as_form_field(self) -> DjangoFormField:
+    def as_form_field(self, inputs: Optional[Mapping[str, Any]] = None) -> forms.Field:
         """Return a Django form Field definition.
 
         Returns:
-            DjangoFormField: The configured Django form Field instance.
+            forms.Field: The configured Django form Field instance.
         """
-        return FIELDS_BY_KEY[self.field_type].as_form_field(**{
-            'required': self.required,
-            'label': self.label,
-            'label_suffix': self.label_suffix,
-            'initial': self.initial,
-            'help_text': self.help_text,
-            **self.form_field_options,
+        field, errors = self.with_modifiers(inputs=inputs)
+
+        return FIELDS_BY_KEY[field.field_type].as_form_field(**{
+            'required': field.required,
+            'label': field.label,
+            'label_suffix': field.label_suffix,
+            'initial': field.initial,
+            'help_text': field.help_text,
+            **field.form_field_options,
         })
 
-    def as_model_field(self) -> models.Field:
+    def as_model_field(self, inputs: Optional[Mapping[str, Any]] = None) -> models.Field:
         """Return a Django model Field definition.
 
         Returns:
             models.Field: The configured Django model Field instance.
         """
-        return FIELDS_BY_KEY[self.field_type].as_model_field(**{
-            'null': not self.required,
-            'blank': not self.label,
-            'default': self.initial,
-            'help_text': self.help_text,
-            **self.model_field_options,
+        field, errors = self.with_modifiers(inputs=inputs)
+
+        return FIELDS_BY_KEY[field.field_type].as_model_field(**{
+            'null': not field.required,
+            'blank': not field.label,
+            'default': field.initial,
+            'help_text': field.help_text,
+            **field.model_field_options,
         })
+
+    def with_modifiers(self, inputs: Optional[Mapping[str, Any]] = None) -> Tuple['Field', Mapping[str, str]]:
+        """Return the field with its modifiers applied.
+
+        Applies all of the field's configured modifiers one by one until all
+        of them have been evaluated.
+
+        Args:
+            field (BaseField): The field to modify.
+            inputs (Optional[Mapping[str, Any]]): The inputs to pass to the
+                `apply()` method of each modifier.
+
+        Returns:
+            Tuple[Field, Sequence[str]]: A tuple containing the modified
+                field and a list of any errors that occurred while evaluating
+                the modifiers.
+        """
+        field = self
+        errors = defaultdict(set)
+
+        for field_modifier in self.field_modifiers.all():
+            field, error = field_modifier.apply(self, inputs=inputs)
+
+            # If any errors were encountered while evaluating the expression,
+            # add them to the collection.
+            if error:
+                errors[field_modifier.attribute_name].add(error)
+
+        return field, errors
 
 
 class Field(BaseField):
@@ -240,6 +293,98 @@ class Field(BaseField):
 
     class Meta:
         swappable = swapper.swappable_setting('flexible_forms', 'Field')
+
+
+class BaseFieldModifier(models.Model):
+    """A dynamic expression for customizing field rendering behavior.
+
+    A FieldModifier is essentially a map of `attribute_name` -> `expression`,
+    where `attribute_name` is the name of a supported attribute on the
+    `Field` model, and `expression` is a valid Python expression.
+
+    When `Field.as_form_field()` or `Field.as_model_field()` is called, the
+    `expression` is evaluated using the `simpleeval` module with the given
+    inputs (usually the field values submitted to the form), and the
+    resulting value is used to override the configured attribute on the
+    `Field`.
+
+    For example:
+
+    >>> field = Field(required=False)
+    >>> unmodified = field.as_form_field()
+    >>> repr(unmodified.required)
+    'False'
+    >>> field.modifiers.create(attribute_name='required', expression='some_input > 1')
+    >>> modified = field.as_form_field({'some_input': 2})
+    >>> repr(modified.required)
+    'True'
+
+    This is useful for modifying the structure and behavior of forms
+    dynamically. Some use cases include:
+
+    * Making fields required only if other fields are filled out.
+    * Setting default values based on the values of other fields.
+    * Hiding a field until another field changes.
+    """
+
+    ATTRIBUTE_VISIBLE = 'visible'
+    ATTRIBUTE_LABEL = 'label'
+    ATTRIBUTE_HELP_TEXT = 'help_text'
+    ATTRIBUTE_REQUIRED = 'required'
+    ATTRIBUTE_INITIAL = 'initial'
+
+    SUPPORTED_ATTRIBUTES = (
+        (ATTRIBUTE_VISIBLE, 'Visible'),
+        (ATTRIBUTE_LABEL, 'Label'),
+        (ATTRIBUTE_HELP_TEXT, 'Help text'),
+        (ATTRIBUTE_REQUIRED, 'Required'),
+        (ATTRIBUTE_INITIAL, 'Initial value'),
+    )
+
+    field = models.ForeignKey(
+        swapper.get_model_name('flexible_forms', 'Field'),
+        on_delete=models.CASCADE,
+        related_name='field_modifiers',
+        editable=False,
+    )
+
+    attribute_name = models.TextField(choices=SUPPORTED_ATTRIBUTES)
+    expression = models.TextField()
+
+    def apply(self, field: BaseField, inputs: Optional[Mapping[str, Any]] = None) -> Tuple[BaseField, str]:
+        """Apply the modifier to the given field.
+
+        Evaluates the configured expression and applies the resulting value
+        to the configured attribute_name on the given Field instance.
+
+        Args:
+            field (BaseField): The field for which to apply the modifier.
+            inputs (Mapping[str, Any]): The inputs to use when evaluating the expression.
+
+        Returns:
+            Tuple[BaseField, str]:
+        """
+        error = None
+
+        try:
+            # Evaluate the expression.
+            attribute_value = evaluate_expression(
+                self.expression, names=inputs)
+
+            # Set the configured field attribute to the value produced by the expression.
+            setattr(field, self.attribute_name, attribute_value)
+        except BaseException as ex:
+            error = str(ex)
+
+        return field, error
+
+
+class FieldModifier(BaseFieldModifier):
+    """A concrete implementation of FieldModifier."""
+
+    class Meta:
+        swappable = swapper.swappable_setting(
+            'flexible_forms', 'FieldModifier')
 
 
 class RecordManager(models.Manager):
