@@ -293,7 +293,6 @@ class BaseField(models.Model):
             'help_text': field.help_text,
             **field.form_field_options,
             'form_widget_options': field.form_widget_options,
-            # 'current_value': field_values.get(self.machine_name),
             '_extra': field._extra
         })
 

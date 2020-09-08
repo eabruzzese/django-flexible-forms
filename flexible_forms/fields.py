@@ -175,23 +175,6 @@ class SingleLineTextField(FlexibleField):
     model_field_class = model_fields.TextField
 
 
-class SearchField(FlexibleField):
-
-    form_field_class = form_fields.CharField
-    form_field_options = {
-        'choices': (
-            ('value1', 'Label 1'),
-            ('value2', 'Label 2'),
-        )
-    }
-
-    def as_form_field(cls, form_widget_options: Optional[Mapping[str, Any]], _extra: Optional[Mapping[str, Any]], **kwargs: Any) -> form_fields.Field:
-        field = super().as_form_field(
-            form_widget_options=form_widget_options, _extra=_extra, **kwargs)
-
-        field.choices = MyModel.objects.filter()
-
-
 class MultiLineTextField(FlexibleField):
     """A field for collecting multiline text values."""
 
