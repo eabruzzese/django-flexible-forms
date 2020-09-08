@@ -2,9 +2,9 @@
 
 """Common utilities."""
 
-from typing import Any, Callable, Mapping, Optional, Set, Type, TypeVar
+from typing import Any, Callable, Mapping, Optional, Sequence, Set, Type, TypeVar
 
-from simpleeval import simple_eval
+from simpleeval import DEFAULT_FUNCTIONS, simple_eval
 
 T = TypeVar('T', bound=Type)
 
@@ -25,7 +25,29 @@ def all_subclasses(cls: T) -> Set[T]:
     ])
 
 
-def evaluate_expression(expression: str, cast: Optional[Callable[..., Any]] = None, **kwargs: Any) -> Any:
+def empty(value: Any, empty_values: Sequence = (None,)) -> bool:
+    """Return True if the given value is "empty".
+
+    Considers a value empty if it's iterable and has no elements, of if the
+    value is in the given sequence of `empty_values` (only None by default).
+
+    Args:
+        value (Any): The value to test for emptiness.
+
+    Returns:
+        bool: True if the given value is empty.
+    """
+    if hasattr(value, '__iter__'):
+        try:
+            next(iter(value))
+        except StopIteration:
+            return True
+        return False
+
+    return value in empty_values
+
+
+def evaluate_expression(expression: str, cast: Optional[Callable[..., Any]] = None, names: Optional[Mapping[str, Any]] = None) -> Any:
     """Safely evaluate a Python expression.
 
     Evaluates a Python expression in a controlled environment.
@@ -41,6 +63,10 @@ def evaluate_expression(expression: str, cast: Optional[Callable[..., Any]] = No
             callable if specified.
     """
     cast = cast or (lambda v: v)
-    value = simple_eval(expression, **kwargs)
+
+    value = simple_eval(expression, names=names, functions={
+        **DEFAULT_FUNCTIONS.copy(),
+        'empty': empty,
+    })
 
     return cast(value)

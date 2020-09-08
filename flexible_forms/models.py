@@ -2,8 +2,11 @@
 
 """Model definitions for the flexible_forms module."""
 
+import logging
+
 from collections import defaultdict
 from typing import Mapping, Optional, TYPE_CHECKING, Any, Dict, Tuple, Type, Union
+from django.core.files.base import File
 
 import swapper
 from django.core.serializers.json import DjangoJSONEncoder
@@ -25,6 +28,9 @@ if TYPE_CHECKING:
     from flexible_forms.forms import RecordForm
 
 
+logger = logging.getLogger(__name__)
+
+
 ##
 # FIELD_TYPE_OPTIONS
 #
@@ -35,6 +41,11 @@ FIELD_TYPE_OPTIONS = sorted(
     ((k, v.label) for k, v in FIELDS_BY_KEY.items()),
     key=lambda o: o[0]
 )
+
+
+class FormRenderContext:
+    read_only = False
+    field_values = {}
 
 
 class BaseForm(models.Model):
@@ -72,11 +83,48 @@ class BaseForm(models.Model):
 
         super().save(*args, **kwargs)
 
-    def as_form_class(self, inputs: Optional[Mapping[str, Any]] = None) -> Type['RecordForm']:
-        """Return the form represented as a Django Form class.
+    def as_django_form(
+        self,
+        data: Optional[Mapping[str, Any]] = None,
+        files: Optional[Mapping[str, File]] = None,
+        instance: Optional['Record'] = None,
+        **kwargs: Any
+    ) -> 'RecordForm':
+        """Return the form represented as a Django form instance.
+
+        Args:
+            data (Optional[Mapping[str, Any]]): Data to be passed to the
+                Django form constructor.
+            files (Optional[Mapping[str, File]]): Data to be passed to the
+                Django form constructor.
+            instance (Optional[Record]): The Record instance to be passed to
+                the Django form constructor.
 
         Returns:
-            Type[ModelForm]: The Django Form class representing this Form.
+            RecordForm: A configured RecordForm (a Django ModelForm instance).
+        """
+        data = data or {}
+        field_values = {
+            **(instance.data if instance else {}),
+            **data,
+        }
+
+        # Generate the form class.
+        form_class = self.as_django_form_class(field_values=field_values)
+
+        # Create a form instance from the form class and the passed parameters.
+        return form_class(data=data, files=files, instance=instance, **kwargs)
+
+    def as_django_form_class(self, field_values: Optional[Mapping[str, Any]] = None) -> Type['RecordForm']:
+        """Return the form represented as a Django Form class.
+
+        Args:
+            field_values (Optional[Mapping[str, Any]]): The values of the
+                fields in the form. These values will be used when evaluating
+                expressions to inform dynamic behaviors.
+
+        Returns:
+            Type[RecordForm]: The Django Form class representing this Form.
         """
         # The RecordForm is imported inline to prevent a circular import.
         from flexible_forms.forms import RecordForm
@@ -84,27 +132,24 @@ class BaseForm(models.Model):
         class_name = self.machine_name.title().replace('_', '')
         form_class_name = f'{class_name}Form'
         all_fields = self.fields.all()
+        field_values = field_values or {}
 
         # Generate the initial list of form fields.
         form_fields = {
             f.machine_name: f.as_form_field() for f in all_fields
         }
 
-        # If any inputs were given, we run them through the to_python method of
-        # their corresponding form field (to get a clean Python value), then we
-        # regenerate the form fields dict using the cleaned inputs to inform
-        # dynamic behavior.
-        if inputs:
-            for field, value in inputs.items():
-                try:
-                    inputs[field] = form_fields[field].to_python(value)
-                except BaseException as ex:
-                    # TODO: Error handling.
-                    pass
+        # Normalize the given field values to ensure they are all cast to their
+        # appropriate types (as defined by their corresponding form fields).
+        for field_name, form_field in form_fields.items():
+            field_value = field_values.get(field_name)
+            field_values[field_name] = form_field.to_python(field_value)
 
-            form_fields = {
-                f.machine_name: f.as_form_field(inputs=inputs) for f in all_fields
-            }
+        # Regenerate the form fields, this time taking the field values into
+        # account in order to inform any dynamic behaviors.
+        form_fields = {
+            f.machine_name: f.as_form_field(field_values=field_values) for f in all_fields
+        }
 
         # Dynamically generate a form class containing all of the fields.
         form_attrs: Mapping[str, Union[str, forms.Field]] = {
@@ -206,6 +251,13 @@ class BaseField(models.Model):
         unique_together = ('form', 'machine_name')
         order_with_respect_to = 'form'
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        # Create an empty _extra dict to store temporary information used for
+        # generating Django field objects.
+        self._extra = {}
+
     def __str__(self) -> str:
         return f'Field `{self.label}` (type {self.field_type}, form ID {self.form_id})'
 
@@ -225,13 +277,13 @@ class BaseField(models.Model):
 
         super().save(*args, **kwargs)
 
-    def as_form_field(self, inputs: Optional[Mapping[str, Any]] = None) -> forms.Field:
+    def as_form_field(self, field_values: Optional[Mapping[str, Any]] = None) -> forms.Field:
         """Return a Django form Field definition.
 
         Returns:
             forms.Field: The configured Django form Field instance.
         """
-        field, errors = self.with_modifiers(inputs=inputs)
+        field, errors = self.with_modifiers(field_values=field_values)
 
         return FIELDS_BY_KEY[field.field_type].as_form_field(**{
             'required': field.required,
@@ -240,15 +292,18 @@ class BaseField(models.Model):
             'initial': field.initial,
             'help_text': field.help_text,
             **field.form_field_options,
+            'form_widget_options': field.form_widget_options,
+            # 'current_value': field_values.get(self.machine_name),
+            '_extra': field._extra
         })
 
-    def as_model_field(self, inputs: Optional[Mapping[str, Any]] = None) -> models.Field:
+    def as_model_field(self, field_values: Optional[Mapping[str, Any]] = None) -> models.Field:
         """Return a Django model Field definition.
 
         Returns:
             models.Field: The configured Django model Field instance.
         """
-        field, errors = self.with_modifiers(inputs=inputs)
+        field, errors = self.with_modifiers(field_values=field_values)
 
         return FIELDS_BY_KEY[field.field_type].as_model_field(**{
             'null': not field.required,
@@ -256,9 +311,10 @@ class BaseField(models.Model):
             'default': field.initial,
             'help_text': field.help_text,
             **field.model_field_options,
+            '_extra': field._extra,
         })
 
-    def with_modifiers(self, inputs: Optional[Mapping[str, Any]] = None) -> Tuple['Field', Mapping[str, str]]:
+    def with_modifiers(self, field_values: Optional[Mapping[str, Any]] = None) -> Tuple['Field', Mapping[str, str]]:
         """Return the field with its modifiers applied.
 
         Applies all of the field's configured modifiers one by one until all
@@ -266,7 +322,7 @@ class BaseField(models.Model):
 
         Args:
             field (BaseField): The field to modify.
-            inputs (Optional[Mapping[str, Any]]): The inputs to pass to the
+            field_values (Optional[Mapping[str, Any]]): The field_values to pass to the
                 `apply()` method of each modifier.
 
         Returns:
@@ -278,7 +334,8 @@ class BaseField(models.Model):
         errors = defaultdict(set)
 
         for field_modifier in self.field_modifiers.all():
-            field, error = field_modifier.apply(self, inputs=inputs)
+            field, error = field_modifier.apply(
+                self, field_values=field_values)
 
             # If any errors were encountered while evaluating the expression,
             # add them to the collection.
@@ -304,7 +361,7 @@ class BaseFieldModifier(models.Model):
 
     When `Field.as_form_field()` or `Field.as_model_field()` is called, the
     `expression` is evaluated using the `simpleeval` module with the given
-    inputs (usually the field values submitted to the form), and the
+    field_values (usually the field values submitted to the form), and the
     resulting value is used to override the configured attribute on the
     `Field`.
 
@@ -327,14 +384,14 @@ class BaseFieldModifier(models.Model):
     * Hiding a field until another field changes.
     """
 
-    ATTRIBUTE_VISIBLE = 'visible'
+    ATTRIBUTE_HIDDEN = 'hidden'
     ATTRIBUTE_LABEL = 'label'
     ATTRIBUTE_HELP_TEXT = 'help_text'
     ATTRIBUTE_REQUIRED = 'required'
     ATTRIBUTE_INITIAL = 'initial'
 
     SUPPORTED_ATTRIBUTES = (
-        (ATTRIBUTE_VISIBLE, 'Visible'),
+        (ATTRIBUTE_HIDDEN, 'Hidden'),
         (ATTRIBUTE_LABEL, 'Label'),
         (ATTRIBUTE_HELP_TEXT, 'Help text'),
         (ATTRIBUTE_REQUIRED, 'Required'),
@@ -349,17 +406,21 @@ class BaseFieldModifier(models.Model):
     )
 
     attribute_name = models.TextField(choices=SUPPORTED_ATTRIBUTES)
-    expression = models.TextField()
+    value_expression = models.TextField()
 
-    def apply(self, field: BaseField, inputs: Optional[Mapping[str, Any]] = None) -> Tuple[BaseField, str]:
+    class Meta:
+        abstract = True
+
+    def apply(self, field: BaseField, field_values: Optional[Mapping[str, Any]] = None) -> Tuple[BaseField, str]:
         """Apply the modifier to the given field.
 
-        Evaluates the configured expression and applies the resulting value
-        to the configured attribute_name on the given Field instance.
+        Evaluates the configured `value_expression` and applies the resulting
+        value to the configured attribute_name on the given Field instance.
 
         Args:
             field (BaseField): The field for which to apply the modifier.
-            inputs (Mapping[str, Any]): The inputs to use when evaluating the expression.
+            field_values (Mapping[str, Any]): The field_values to use when evaluating the
+                `value_expression`.
 
         Returns:
             Tuple[BaseField, str]:
@@ -369,12 +430,24 @@ class BaseFieldModifier(models.Model):
         try:
             # Evaluate the expression.
             attribute_value = evaluate_expression(
-                self.expression, names=inputs)
+                self.value_expression, names=field_values)
 
-            # Set the configured field attribute to the value produced by the expression.
-            setattr(field, self.attribute_name, attribute_value)
+            # Set the configured field attribute to the value produced by the
+            # expression.
+            #
+            # If the attribute name does not exist on the field (i.e., it's not
+            # an existing property on the Field model), it is placed into the
+            # `_extra` dict instead to denote that it should be handled
+            # explicitly (and not passed directly to a Django form field
+            # constructor).
+            if hasattr(field, self.attribute_name):
+                setattr(field, self.attribute_name, attribute_value)
+            else:
+                field._extra[self.attribute_name] = attribute_value
         except BaseException as ex:
             error = str(ex)
+            if field_values:
+                logger.warn(error)
 
         return field, error
 

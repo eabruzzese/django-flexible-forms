@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'nested_admin',
     'flexible_forms',
     'test_app',
 ]
@@ -132,3 +133,4 @@ FLEXIBLE_FORMS_FORM_MODEL = 'test_app.CustomForm'
 FLEXIBLE_FORMS_FIELD_MODEL = 'test_app.CustomField'
 FLEXIBLE_FORMS_RECORD_MODEL = 'test_app.CustomRecord'
 FLEXIBLE_FORMS_RECORDATTRIBUTE_MODEL = 'test_app.CustomRecordAttribute'
+FLEXIBLE_FORMS_FIELDMODIFIER_MODEL = 'test_app.CustomFieldModifier'

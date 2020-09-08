@@ -3,6 +3,8 @@
 """Tests for form-related models."""
 
 from datetime import timedelta
+
+from django.forms.widgets import HiddenInput, TextInput
 from flexible_forms.models import BaseFieldModifier
 from typing import Sequence, cast
 
@@ -65,58 +67,79 @@ def test_field() -> None:
 
 
 @pytest.mark.django_db
-def test_field_modifiers() -> None:
-    """Ensure that fields can be dynamically modified based on form inputs."""
-    form = FormFactory(label='Dynamic Form')
+def test_form_lifecycle() -> None:
+    form = FormFactory(label='Bridgekeeper')
 
-    integer_field = FieldFactory(
+    name_field = FieldFactory(
         form=form,
-        label='Integer Field',
-        machine_name='integer_field',
-        field_type='INTEGER',
-        required=False
-    )
-
-    dynamic_field = FieldFactory(
-        form=form,
-        label='Dynamic Field',
-        machine_name='dynamic_field',
+        label='What... is your name?',
+        machine_name='name',
         field_type='SINGLE_LINE_TEXT',
-        required=False
+        required=True
     )
 
-    dynamic_field.field_modifiers.create(
-        attribute_name=BaseFieldModifier.ATTRIBUTE_REQUIRED,
-        expression='integer_field > 1'
+    # Define a field that is only visible and required if the name field is not
+    # empty.
+    quest_field = FieldFactory(
+        form=form,
+        label='What... is your quest?',
+        machine_name='quest',
+        field_type='SINGLE_LINE_TEXT',
+        required=True
+    )
+    quest_field.field_modifiers.create(
+        attribute_name=BaseFieldModifier.ATTRIBUTE_HIDDEN,
+        value_expression='empty(name)'
     )
 
-    # When generating the form class with no inputs, the value of the attribute
-    # on the dynamic field should be the value stored in the database.
-    form_class = form.as_form_class()
-    assert form_class.declared_fields['dynamic_field'].required is False
+    # Define a field that is only visible and required if the name field is not
+    # empty.
+    favorite_color_field = FieldFactory(
+        form=form,
+        label='What... is your favorite color?',
+        machine_name='favorite_color',
+        field_type='SINGLE_LINE_TEXT',
+        required=True
+    )
+    favorite_color_field.field_modifiers.create(
+        attribute_name=BaseFieldModifier.ATTRIBUTE_HIDDEN,
+        value_expression='empty(quest)'
+    )
 
-    # When the modifier's expression is not satisfied with the given inputs,
-    # the attribute on the dynamic field should be unchanged.
-    form_class = form.as_form_class(inputs={'integer_field': 1})
-    assert form_class.declared_fields['dynamic_field'].required is False
+    # Initially, the form should have three fields. Only the first field should
+    # be visible and required.
+    #
+    # Since the first field is required, the form should not be valid since we
+    # haven't provided a value for it.
+    field_values = {}
+    django_form = form.as_django_form(data=field_values)
 
-    # When the modifier's expression is satisfied with the given inputs, the
-    # attribute on the dynamic field should be set to the value returned by the
-    # expression.
-    form_class = form.as_form_class(inputs={'integer_field': 2})
-    assert form_class.declared_fields['dynamic_field'].required is True
+    form_fields = django_form.declared_fields
+    assert form_fields['name'].required
+    assert isinstance(form_fields['name'].widget, TextInput)
+    assert not form_fields['quest'].required
+    assert isinstance(form_fields['quest'].widget, HiddenInput)
+    assert not form_fields['favorite_color'].required
+    assert isinstance(form_fields['favorite_color'].widget, HiddenInput)
 
-    # When the expression is given an input of an incorrect type that is able
-    # to be cast to the correct type (i.e., a string with digits being cast to
-    # an integer), the inputs should be cast before attempting to evaluate the
-    # modifier expression.
-    form_class = form.as_form_class(inputs={'integer_field': '2.0'})
-    assert form_class.declared_fields['dynamic_field'].required is True
+    assert not django_form.is_valid()
+    assert 'name' in django_form.errors
 
-    # When the expression is given a completely invalid input that is unable to
-    # be cast, the modifier should have no effect.
-    form_class = form.as_form_class(inputs={'integer_field': 'invalid'})
-    assert form_class.declared_fields['dynamic_field'].required is False
+    # Filling out the first field and saving the form should cause the
+    # second field to become visible and required.
+    field_values = {
+        **field_values,
+        'name': 'Sir Lancelot of Camelot'
+    }
+    django_form = form.as_django_form(field_values)
+
+    form_fields = django_form.declared_fields
+    assert form_fields['name'].required
+    assert isinstance(form_fields['name'].widget, TextInput)
+    assert form_fields['quest'].required
+    assert isinstance(form_fields['quest'].widget, TextInput)
+    assert not form_fields['favorite_color'].required
+    assert isinstance(form_fields['favorite_color'].widget, HiddenInput)
 
 
 @settings(deadline=None, suppress_health_check=(HealthCheck.too_slow,))
@@ -158,7 +181,7 @@ def test_record(
 
         fields = (*fields, field)
 
-    django_form_class = form.as_form_class()
+    django_form_class = form.as_django_form_class()
 
     with rollback():
         # Fill out the form (and use the same strategy for the form field as

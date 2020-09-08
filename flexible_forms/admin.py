@@ -2,34 +2,78 @@
 
 """Django admin configurations for flexible_forms."""
 
+import logging
+
 from typing import Any, Optional, cast
 
 import swapper
 from django import forms
 from django.contrib import admin
+from django.conf import settings
 from django.db import models
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.urls import reverse
 from django.utils.safestring import SafeText, mark_safe
 
-# Load our swappable models.
+logger = logging.getLogger(__name__)
+
+ModelAdmin = admin.ModelAdmin
+StackedInline = admin.StackedInline
+TabularInline = admin.TabularInline
+
+##
+# Nested admin support
+#
+# If the project has the nested_admin Django app installed, we'll try to use it
+# so that field modifiers can be configured via the Django Admin.
+#
+if 'nested_admin' in settings.INSTALLED_APPS:
+    from nested_admin.nested import (
+        NestedModelAdmin as ModelAdmin,
+        NestedTabularInline as TabularInline,
+        NestedStackedInline as StackedInline
+    )
+
+    # Load our swappable models.
 Field = swapper.load_model('flexible_forms', 'Field')
+FieldModifier = swapper.load_model('flexible_forms', 'FieldModifier')
 Form = swapper.load_model('flexible_forms', 'Form')
 Record = swapper.load_model('flexible_forms', 'Record')
 
 
-class FieldsInline(admin.StackedInline):
-    """An inline representing a single field on an Form."""
+class FieldModifiersInline(TabularInline):
+    """An inline representing a single modifier for a field on a form."""
+    # classes = ('collapse',)
+    extra = 1
+    model = FieldModifier
+
+    formfield_overrides = {
+        models.TextField: {'widget': forms.widgets.TextInput(attrs={'size': '50'})},
+    }
+
+
+class FieldsInline(StackedInline):
+    """An inline representing a single field on a Form."""
 
     classes = ('collapse',)
-    exclude = ('_order', 'label_suffix', 'sort_order')
+    exclude = ('_order', 'label_suffix')
     extra = 1
     model = Field
     fk_name = 'form'
 
+    formfield_overrides = {
+        models.TextField: {'widget': forms.widgets.TextInput(attrs={'size': '50'})},
+    }
 
-class FormsAdmin(admin.ModelAdmin):
+    inlines = (FieldModifiersInline,)
+
+
+class FormsAdmin(ModelAdmin):
     """An admin configuration for managing flexible forms."""
+
+    formfield_overrides = {
+        models.TextField: {'widget': forms.widgets.TextInput(attrs={'size': '50'})},
+    }
 
     list_display = ('label', '_fields_count', '_records_count', '_add_record')
 
@@ -143,7 +187,7 @@ class RecordsAdmin(admin.ModelAdmin):
             forms.Form: The form object to be rendered.
         """
         if obj:
-            return obj.form.as_form_class()
+            return obj.form.as_django_form_class(field_values=obj.data)
 
         return cast(
             forms.Form,

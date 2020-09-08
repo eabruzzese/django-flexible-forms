@@ -83,6 +83,18 @@ bcrypt = ["bcrypt"]
 
 [[package]]
 category = "dev"
+description = "Django admin classes that allow for nested inlines"
+name = "django-nested-admin"
+optional = false
+python-versions = "*"
+version = "3.3.2"
+
+[package.dependencies]
+python-monkey-business = ">=1.0.0"
+six = "*"
+
+[[package]]
+category = "dev"
 description = "Mypy stubs for Django"
 name = "django-stubs"
 optional = false
@@ -349,6 +361,17 @@ version = "2.8.1"
 six = ">=1.5"
 
 [[package]]
+category = "dev"
+description = "Utility functions for monkey-patching python code"
+name = "python-monkey-business"
+optional = false
+python-versions = "*"
+version = "1.0.0"
+
+[package.dependencies]
+six = ">=1.7.0"
+
+[[package]]
 category = "main"
 description = "World timezone definitions, modern and historical"
 name = "pytz"
@@ -429,7 +452,7 @@ python-versions = "*"
 version = "3.7.4.2"
 
 [metadata]
-content-hash = "d9298408bce1c4c03ed828446fdee537d134619651d41fa9bb588fbb5213654c"
+content-hash = "914d5786aaf859f071b9a0b571e416e334fac05b2b1ffc1d9db1010b441d05e5"
 lock-version = "1.0"
 python-versions = "^3.8"
 
@@ -492,6 +515,10 @@ coverage = [
 django = [
     {file = "Django-3.1-py3-none-any.whl", hash = "sha256:1a63f5bb6ff4d7c42f62a519edc2adbb37f9b78068a5a862beff858b68e3dc8b"},
     {file = "Django-3.1.tar.gz", hash = "sha256:2d390268a13c655c97e0e2ede9d117007996db692c1bb93eabebd4fb7ea7012b"},
+]
+django-nested-admin = [
+    {file = "django-nested-admin-3.3.2.tar.gz", hash = "sha256:7ec58af67107e6d7b2d0fd4fe03629eff8f7957c4aef5033c4700da1bd2d7870"},
+    {file = "django_nested_admin-3.3.2-py2.py3-none-any.whl", hash = "sha256:2e6706050057f5dc5664bc90d034d4ed9e3ae032ead6b063da9982c9e45ab7f3"},
 ]
 django-stubs = [
     {file = "django-stubs-1.5.0.tar.gz", hash = "sha256:b4c9042f2c2fcb89dc0fb37df070cce0f9bf93b39ae193847b6e5a392b13c430"},
@@ -611,6 +638,10 @@ pytest-timeout = [
 python-dateutil = [
     {file = "python-dateutil-2.8.1.tar.gz", hash = "sha256:73ebfe9dbf22e832286dafa60473e4cd239f8592f699aa5adaf10050e6e1823c"},
     {file = "python_dateutil-2.8.1-py2.py3-none-any.whl", hash = "sha256:75bb3f31ea686f1197762692a9ee6a7550b59fc6ca3a1f4b5d7e32fb98e2da2a"},
+]
+python-monkey-business = [
+    {file = "python-monkey-business-1.0.0.tar.gz", hash = "sha256:9976522989766f00b2aaa24ec96eacb91a6de7b7001d1452079323b071988e0e"},
+    {file = "python_monkey_business-1.0.0-py2.py3-none-any.whl", hash = "sha256:6d4cf47f011945db838ccf04643acd49b82f7ad6ab7ecba4c8165385687a828a"},
 ]
 pytz = [
     {file = "pytz-2020.1-py2.py3-none-any.whl", hash = "sha256:a494d53b6d39c3c6e44c3bec237336e14305e4f29bbf800b599253057fbb79ed"},

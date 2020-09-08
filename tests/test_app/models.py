@@ -3,7 +3,7 @@ import uuid
 from django.db import models
 
 from flexible_forms.models import (
-    BaseField,
+    BaseField, BaseFieldModifier,
     BaseForm,
     BaseRecord,
     BaseRecordAttribute
@@ -41,4 +41,8 @@ class CustomRecord(BaseRecord, CustomBaseModel):
 
 
 class CustomRecordAttribute(BaseRecordAttribute, CustomBaseModel):
+    """A customized and swapped-out version of the RecordAttribute provided by flexible_forms."""
+
+
+class CustomFieldModifier(BaseFieldModifier, CustomBaseModel):
     """A customized and swapped-out version of the RecordAttribute provided by flexible_forms."""

@@ -6,7 +6,7 @@ from typing import (
     Any,
     Dict,
     Iterable,
-    List,
+    List, Mapping,
     Optional,
     Tuple,
     Type,
@@ -110,12 +110,19 @@ class FlexibleField:
     model_field_options: Dict[str, Any] = {}
 
     @classmethod
-    def as_form_field(cls, **kwargs: Any) -> form_fields.Field:
+    def as_form_field(
+        cls,
+        form_widget_options: Optional[Mapping[str, Any]] = None,
+        _extra: Optional[Mapping[str, Any]] = None,
+        **kwargs: Any
+    ) -> form_fields.Field:
         """Return an instance of the field for use in a Django form.
 
         Receives a dict of kwargs to pass through to the form field constructor.
 
         Args:
+            _extra (Optional[Mapping[str, Any]]): A mapping containing additional
+                parameters used for generating the form field.
             kwargs (Any): A dict of kwargs to be passed to the constructor of the
                 `form_field_class`.
 
@@ -125,8 +132,14 @@ class FlexibleField:
         if cls.form_widget_class:
             kwargs['widget'] = cls.form_widget_class(**{
                 **cls.form_widget_options,
-                **kwargs.pop('form_widget_options', {})
+                **(form_widget_options or {})
             })
+
+        # If the field is marked as hidden, its widget is automatically changed
+        # to a HiddenInput, and its `required` attribute is set to False.
+        if _extra.get('hidden'):
+            kwargs['widget'] = form_widgets.HiddenInput()
+            kwargs['required'] = False
 
         return cls.form_field_class(**{
             **cls.form_field_options,
@@ -134,7 +147,7 @@ class FlexibleField:
         })
 
     @classmethod
-    def as_model_field(cls, **kwargs: Any) -> model_fields.Field:
+    def as_model_field(cls, _extra: Optional[Mapping[str, Any]] = None, **kwargs: Any) -> model_fields.Field:
         """Return an instance of the field for use in a Django model.
 
         Receives a dict of kwargs to pass through to the model field constructor.
@@ -160,6 +173,23 @@ class SingleLineTextField(FlexibleField):
 
     form_field_class = form_fields.CharField
     model_field_class = model_fields.TextField
+
+
+class SearchField(FlexibleField):
+
+    form_field_class = form_fields.CharField
+    form_field_options = {
+        'choices': (
+            ('value1', 'Label 1'),
+            ('value2', 'Label 2'),
+        )
+    }
+
+    def as_form_field(cls, form_widget_options: Optional[Mapping[str, Any]], _extra: Optional[Mapping[str, Any]], **kwargs: Any) -> form_fields.Field:
+        field = super().as_form_field(
+            form_widget_options=form_widget_options, _extra=_extra, **kwargs)
+
+        field.choices = MyModel.objects.filter()
 
 
 class MultiLineTextField(FlexibleField):
