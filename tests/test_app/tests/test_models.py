@@ -181,12 +181,11 @@ def test_record(
 
         fields = (*fields, field)
 
-    django_form_class = form.as_django_form_class()
-
     with rollback():
         # Fill out the form (and use the same strategy for the form field as
         # the model field when handling durations)
         with patch_field_strategies({forms.DurationField: duration_strategy}):
+            django_form_class = form.as_django_form().__class__
             django_form_instance = cast(
                 forms.ModelForm,
                 data.draw(from_form(django_form_class))

@@ -5,7 +5,7 @@
 import logging
 
 from collections import defaultdict
-from typing import Mapping, Optional, TYPE_CHECKING, Any, Dict, Tuple, Type, Union
+from typing import Mapping, Optional, TYPE_CHECKING, Any, Dict, Tuple
 from django.core.files.base import File
 
 import swapper
@@ -41,11 +41,6 @@ FIELD_TYPE_OPTIONS = sorted(
     ((k, v.label) for k, v in FIELDS_BY_KEY.items()),
     key=lambda o: o[0]
 )
-
-
-class FormRenderContext:
-    read_only = False
-    field_values = {}
 
 
 class BaseForm(models.Model):
@@ -104,42 +99,23 @@ class BaseForm(models.Model):
             RecordForm: A configured RecordForm (a Django ModelForm instance).
         """
         data = data or {}
-        field_values = {
-            **(instance.data if instance else {}),
-            **data,
-        }
+        files = files or {}
+        instance_data = instance.data if instance else {}
 
-        # Generate the form class.
-        form_class = self.as_django_form_class(field_values=field_values)
-
-        # Create a form instance from the form class and the passed parameters.
-        return form_class(data=data, files=files, instance=instance, **kwargs)
-
-    def as_django_form_class(self, field_values: Optional[Mapping[str, Any]] = None) -> Type['RecordForm']:
-        """Return the form represented as a Django Form class.
-
-        Args:
-            field_values (Optional[Mapping[str, Any]]): The values of the
-                fields in the form. These values will be used when evaluating
-                expressions to inform dynamic behaviors.
-
-        Returns:
-            Type[RecordForm]: The Django Form class representing this Form.
-        """
         # The RecordForm is imported inline to prevent a circular import.
         from flexible_forms.forms import RecordForm
 
         class_name = self.machine_name.title().replace('_', '')
         form_class_name = f'{class_name}Form'
         all_fields = self.fields.all()
-        field_values = field_values or {}
+        field_values = {**instance_data, **data, **files}
 
-        # Generate the initial list of form fields.
+        # Generate the initial list of fields that comprise the form.
         form_fields = {
             f.machine_name: f.as_form_field() for f in all_fields
         }
 
-        # Normalize the given field values to ensure they are all cast to their
+        # Normalize the field values to ensure they are all cast to their
         # appropriate types (as defined by their corresponding form fields).
         for field_name, form_field in form_fields.items():
             field_value = field_values.get(field_name)
@@ -152,12 +128,16 @@ class BaseForm(models.Model):
         }
 
         # Dynamically generate a form class containing all of the fields.
-        form_attrs: Mapping[str, Union[str, forms.Field]] = {
+        form_class = type(form_class_name, (RecordForm,), {
             '__module__': self.__module__,
             **form_fields
-        }
+        })
 
-        return type(form_class_name, (RecordForm,), form_attrs)
+        # Create a form instance from the form class and the passed parameters.
+        form_instance = form_class(
+            data=data, files=files, instance=instance, **kwargs)
+
+        return form_instance
 
 
 class Form(BaseForm):
@@ -246,17 +226,24 @@ class BaseField(models.Model):
         editable=False,
     )
 
+    ##
+    # Ephemeral attributes.
+    #
+    # While a Field instance is being rendered into a Django form field, it may
+    # hold additional information to assist in that rendering. For example, a
+    # particular field might be "hidden" or "readonly" based on some criteria
+    # while the field is being rendered.
+    #
+    # These ephemeral attributes are declared here to assist with typing and
+    # reduce opacity into this process.
+    #
+    hidden: bool = False
+    readonly: bool = False
+
     class Meta:
         abstract = True
         unique_together = ('form', 'machine_name')
         order_with_respect_to = 'form'
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-
-        # Create an empty _extra dict to store temporary information used for
-        # generating Django field objects.
-        self._extra = {}
 
     def __str__(self) -> str:
         return f'Field `{self.label}` (type {self.field_type}, form ID {self.form_id})'
@@ -283,37 +270,38 @@ class BaseField(models.Model):
         Returns:
             forms.Field: The configured Django form Field instance.
         """
-        field, errors = self.with_modifiers(field_values=field_values)
-
-        return FIELDS_BY_KEY[field.field_type].as_form_field(**{
-            'required': field.required,
-            'label': field.label,
-            'label_suffix': field.label_suffix,
-            'initial': field.initial,
-            'help_text': field.help_text,
-            **field.form_field_options,
-            'form_widget_options': field.form_widget_options,
-            '_extra': field._extra
+        return FIELDS_BY_KEY[self.field_type].as_form_field(**{
+            # Special parameters.
+            'field_modifiers': (
+                (m.attribute_name, m.value_expression)
+                for m in self.field_modifiers.all()
+            ),
+            'field_values': field_values,
+            'form_widget_options': self.form_widget_options,
+            # Django form field arguments.
+            'required': self.required,
+            'label': self.label,
+            'label_suffix': self.label_suffix,
+            'initial': self.initial,
+            'help_text': self.help_text,
+            **self.form_field_options,
         })
 
-    def as_model_field(self, field_values: Optional[Mapping[str, Any]] = None) -> models.Field:
+    def as_model_field(self) -> models.Field:
         """Return a Django model Field definition.
 
         Returns:
             models.Field: The configured Django model Field instance.
         """
-        field, errors = self.with_modifiers(field_values=field_values)
-
-        return FIELDS_BY_KEY[field.field_type].as_model_field(**{
-            'null': not field.required,
-            'blank': not field.label,
-            'default': field.initial,
-            'help_text': field.help_text,
-            **field.model_field_options,
-            '_extra': field._extra,
+        return FIELDS_BY_KEY[self.field_type].as_model_field(**{
+            'null': not self.required,
+            'blank': not self.label,
+            'default': self.initial,
+            'help_text': self.help_text,
+            **self.model_field_options,
         })
 
-    def with_modifiers(self, field_values: Optional[Mapping[str, Any]] = None) -> Tuple['Field', Mapping[str, str]]:
+    def apply_modifiers(self, field_values: Optional[Mapping[str, Any]] = None) -> Tuple['Field', Mapping[str, str]]:
         """Return the field with its modifiers applied.
 
         Applies all of the field's configured modifiers one by one until all
@@ -325,7 +313,7 @@ class BaseField(models.Model):
                 `apply()` method of each modifier.
 
         Returns:
-            Tuple[Field, Sequence[str]]: A tuple containing the modified
+            Tuple[Field, Mapping[str, str]]: A tuple containing the modified
                 field and a list of any errors that occurred while evaluating
                 the modifiers.
         """
@@ -427,22 +415,11 @@ class BaseFieldModifier(models.Model):
         error = None
 
         try:
-            # Evaluate the expression.
+            # Evaluate the expression and set the attribute specified by
+            # `self.attribute_name` to the value it returns.
             attribute_value = evaluate_expression(
                 self.value_expression, names=field_values)
-
-            # Set the configured field attribute to the value produced by the
-            # expression.
-            #
-            # If the attribute name does not exist on the field (i.e., it's not
-            # an existing property on the Field model), it is placed into the
-            # `_extra` dict instead to denote that it should be handled
-            # explicitly (and not passed directly to a Django form field
-            # constructor).
-            if hasattr(field, self.attribute_name):
-                setattr(field, self.attribute_name, attribute_value)
-            else:
-                field._extra[self.attribute_name] = attribute_value
+            setattr(field, self.attribute_name, attribute_value)
         except BaseException as ex:
             error = str(ex)
             if field_values:

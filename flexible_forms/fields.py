@@ -2,16 +2,16 @@
 
 """Field definitions for the flexible_forms module."""
 
+import simpleeval
 from typing import (
     Any,
     Dict,
     Iterable,
     List, Mapping,
-    Optional,
+    Optional, Sequence,
     Tuple,
     Type,
     Union,
-    cast
 )
 
 from django.db.models import Field, FileField, ImageField, Model
@@ -24,7 +24,7 @@ try:
 except ImportError:
     from django.contrib.postgres.fields import JSONField
 
-from .utils import all_subclasses
+from .utils import all_subclasses, evaluate_expression
 
 ##
 # _EMPTY_CHOICES
@@ -112,8 +112,9 @@ class FlexibleField:
     @classmethod
     def as_form_field(
         cls,
+        field_modifiers: Sequence[Tuple[str, str]] = (),
+        field_values: Optional[Mapping[str, Any]] = None,
         form_widget_options: Optional[Mapping[str, Any]] = None,
-        _extra: Optional[Mapping[str, Any]] = None,
         **kwargs: Any
     ) -> form_fields.Field:
         """Return an instance of the field for use in a Django form.
@@ -121,33 +122,43 @@ class FlexibleField:
         Receives a dict of kwargs to pass through to the form field constructor.
 
         Args:
-            _extra (Optional[Mapping[str, Any]]): A mapping containing additional
-                parameters used for generating the form field.
+            field_modifiers (Sequence[Tuple[str, str]]): A sequence of modifiers to
+                be applied to the field.
+            field_values (Optional[Mapping[str, Any]]): A mapping of the
+                current form values.
+            form_widget_options (Optional[Mapping[str, Any]]): A mapping of
+                options to pass to the widget constructor if a widget is
+                configured.
             kwargs (Any): A dict of kwargs to be passed to the constructor of the
                 `form_field_class`.
 
         Returns:
             form_fields.Field: An instance of the form field.
         """
+        # If a form widget is explicitly configured, use it.
         if cls.form_widget_class:
             kwargs['widget'] = cls.form_widget_class(**{
                 **cls.form_widget_options,
                 **(form_widget_options or {})
             })
 
-        # If the field is marked as hidden, its widget is automatically changed
-        # to a HiddenInput, and its `required` attribute is set to False.
-        if _extra.get('hidden'):
-            kwargs['widget'] = form_widgets.HiddenInput()
-            kwargs['required'] = False
-
-        return cls.form_field_class(**{
+        # Generate the form field class.
+        form_field = cls.form_field_class(**{
             **cls.form_field_options,
             **kwargs,
         })
 
+        # Apply any modifiers to the field.
+        form_field = cls.apply_modifiers(
+            form_field=form_field,
+            field_modifiers=field_modifiers,
+            field_values=field_values
+        )
+
+        return form_field
+
     @classmethod
-    def as_model_field(cls, _extra: Optional[Mapping[str, Any]] = None, **kwargs: Any) -> model_fields.Field:
+    def as_model_field(cls, **kwargs: Any) -> model_fields.Field:
         """Return an instance of the field for use in a Django model.
 
         Receives a dict of kwargs to pass through to the model field constructor.
@@ -163,6 +174,83 @@ class FlexibleField:
             **cls.model_field_options,
             **kwargs,
         })
+
+    @classmethod
+    def apply_modifiers(
+        cls,
+        form_field: form_fields.Field,
+        field_modifiers: Sequence[Tuple[str, str]] = (),
+        field_values: Optional[Mapping[str, Any]] = None,
+    ) -> form_fields.Field:
+        """Apply the given modifiers to the given Django form field.
+
+        Args:
+            form_field (form_fields.Field): The form field to be modified.
+            modifiers (Sequence[Tuple[str, str]]): A sequence of tuples in the form
+                of (attribute_name, value_expression) tuples to apply to the
+                field.
+
+        Returns:
+            form_fields.Field: The given form field, modified using the modifiers.
+        """
+        for attribute_name, value_expression in field_modifiers:
+            # Evaluate the expression and set the attribute specified by
+            # `self.attribute_name` to the value it returns.
+            try:
+                modified_value = evaluate_expression(
+                    value_expression, names=field_values)
+            except simpleeval.NameNotDefined:
+                continue
+
+            # If the caller has implemented a custom apply_ATTRIBUTENAME method
+            # to handle application of the attribute, use it.
+            custom_applicator = getattr(cls, f'apply_{attribute_name}', None)
+            if custom_applicator:
+                form_field = custom_applicator(**{
+                    'form_field': form_field,
+                    attribute_name: modified_value,
+                    'field_values': field_values
+                })
+
+            # If no custom applicator method is implemented, but the form field
+            # has an attribute with the specified name, set its value to the
+            # result of the expression.
+            elif hasattr(form_field, attribute_name):
+                setattr(form_field, attribute_name, modified_value)
+
+            # If the field has no attribute with the specified name, and no
+            # applicator method has been implemented to handle the custom
+            # attribute, throw an error.
+            else:
+                raise LookupError(
+                    f'Attempted to modify `{attribute_name}` for {type(form_field)} form field '
+                    f'`{form_field.name}`, but the field has no attribute `{attribute_name}`, and '
+                    f'no `apply_{attribute_name}` method exists on `{type(cls)}`.')
+
+        return form_field
+
+    @classmethod
+    def apply_hidden(cls, form_field: form_fields.Field, hidden: bool = False, **kwargs: Any) -> form_fields.Field:
+        """Apply the "hidden" attribute.
+
+        If a field modifier specifies that the field should be "hidden", its
+        widget is changed to a HiddenInput, and its "required" attribute is
+        set to False.
+
+        Args:
+            form_field (form_fields.Field): The form field that should be hidden.
+            hidden (bool): The new value of "hidden".
+            kwargs (Any): Unused.
+
+        Returns:
+            form_fields.Field: The given form_field, modified to use the
+                given "hidden" value.
+        """
+        if hidden:
+            form_field.widget = form_widgets.HiddenInput()
+            form_field.required = False
+
+        return form_field
 
 
 class SingleLineTextField(FlexibleField):
@@ -487,7 +575,7 @@ class ValueRouter:
         """Configure the ValueRouter.
 
         Args:
-            types (Iterable[Field]): An iterable of model field
+            types(Iterable[Field]): An iterable of model field
                 instances that the ValueRouter should support.
         """
         self._types = frozenset(types)
@@ -559,8 +647,8 @@ class ValueRouter:
             """Set the appropriate value field to the given value.
 
             Args:
-                model (Model): The model instance on which to set the value.
-                value (Any): The value to set.
+                model(Model): The model instance on which to set the value.
+                value(Any): The value to set.
             """
             if not model._value_field:  # type: ignore
                 raise KeyError('The model does not have a _value_field set.')

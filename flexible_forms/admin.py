@@ -187,7 +187,7 @@ class RecordsAdmin(admin.ModelAdmin):
             forms.Form: The form object to be rendered.
         """
         if obj:
-            return obj.form.as_django_form_class(field_values=obj.data)
+            return obj.form.as_django_form(data=obj.data).__class__
 
         return cast(
             forms.Form,
