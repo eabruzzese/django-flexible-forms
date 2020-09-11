@@ -155,6 +155,10 @@ class FlexibleField:
             field_values=field_values
         )
 
+        # Any fields with "None" as an option in their choices can never be required.
+        if any(c[0] is None for c in getattr(form_field, 'choices', [])):
+            form_field.required = False
+
         return form_field
 
     @classmethod
@@ -403,10 +407,10 @@ class YesNoRadioField(FlexibleField):
     form_field_class = form_fields.TypedChoiceField
     form_field_options = {
         'choices': (
-            ('Yes', True),
-            ('No', False),
+            (True, 'Yes'),
+            (False, 'No'),
         ),
-        'coerce': bool
+        'coerce': lambda v: True if v in ('True', True) else False
     }
     form_widget_class = form_widgets.RadioSelect
     model_field_class = model_fields.BooleanField
@@ -418,7 +422,19 @@ class YesNoUnknownRadioField(FlexibleField):
     key = 'YES_NO_UNKNOWN_RADIO'
     label = 'Yes/No/Unknown Radio Buttons'
 
-    form_field_class = form_fields.NullBooleanField
+    form_field_class = form_fields.TypedChoiceField
+    form_field_options = {
+        'choices': (
+            (True, 'Yes'),
+            (False, 'No'),
+            (None, 'Unknown'),
+        ),
+        'coerce': lambda v: (
+            True if v in ('True', True) else
+            False if v in ('False', False) else
+            None
+        )
+    }
     form_widget_class = form_widgets.RadioSelect
     model_field_class = model_fields.BooleanField
     model_field_options = {'null': True}
@@ -433,10 +449,10 @@ class YesNoSelectField(FlexibleField):
     form_field_class = form_fields.TypedChoiceField
     form_field_options = {
         'choices': (
-            ('Yes', True),
-            ('No', False),
+            (True, 'Yes'),
+            (False, 'No'),
         ),
-        'coerce': bool
+        'coerce': lambda v: True if v in ('True', True) else False
     }
     form_widget_class = form_widgets.Select
     model_field_class = model_fields.BooleanField
@@ -445,10 +461,22 @@ class YesNoSelectField(FlexibleField):
 class YesNoUnknownSelectField(FlexibleField):
     """A field for collecting a boolean value with a yes/no select field."""
 
-    key = 'YES_NO_SELECT'
+    key = 'YES_NO_UNKNOWN_SELECT'
     label = 'Yes/No/Unknown Dropdown'
 
-    form_field_class = form_fields.NullBooleanField
+    form_field_class = form_fields.TypedChoiceField
+    form_field_options = {
+        'choices': (
+            (True, 'Yes'),
+            (False, 'No'),
+            (None, 'Unknown'),
+        ),
+        'coerce': lambda v: (
+            True if v in ('True', True) else
+            False if v in ('False', False) else
+            None
+        )
+    }
     model_field_class = model_fields.BooleanField
     model_field_options = {'null': True}
 
@@ -529,136 +557,3 @@ class ImageUploadField(FlexibleField):
 #
 FIELDS_BY_KEY: Dict[str, Type[FlexibleField]] = {
     f.key: f for f in all_subclasses(FlexibleField)}
-
-
-class ValueRouter:
-    """Injects a field into a model for each type specified.
-
-    Overrides the `value` getter and setter to route to the appropriate field.
-
-    For example, this model:
-
-    class MyModel(models.Model):
-        value = ValueRouter(
-            types=(
-                models.TextField(),
-                models.DecimalField(max_digits=19, decimal_places=10)
-            )
-        )
-
-    Will be rendered equivalent to:
-
-    class MyModel(models.Model):
-        # A field for storing the name of the field where the value can be found.
-        _value_field = models.CharField(
-            choices=(
-                ('_textfield_value', 'TextField'),
-                ('_decimalfield_value', 'DecimalField'),
-            )
-        )
-
-        # A field for each distinct type of value.
-        _textfield_value = models.TextField(blank=True, null=True)
-        _decimalfield_value = models.DecimalField(
-            blank=True, null=True, max_digits=19, decimal_places=10)
-
-        @property
-        def value(self) -> Union[str, Decimal]:
-            return getattr(self, self._value_field)
-
-        @value.setter
-        def value(self, value) -> None:
-            setattr(self, self._value_field, value)
-    """
-
-    def __init__(self, types: Iterable[Field]):
-        """Configure the ValueRouter.
-
-        Args:
-            types(Iterable[Field]): An iterable of model field
-                instances that the ValueRouter should support.
-        """
-        self._types = frozenset(types)
-
-    def contribute_to_class(self, cls: Type[Model], name: str) -> None:
-        """Add model fields based on what is supported by dynamic forms.
-
-        Args:
-            cls: The class to be modified.
-            name: The name of the attribute that ValueRouter is assigned to.
-        """
-        value_fields = {
-            f'_{t.__class__.__name__.lower()}_value': t
-            for t in self._types
-        }
-
-        # Add fields for storing each type of field value, and add them
-        # to the list of supported value fields.
-        value_field_choices: List[Tuple[str, str]] = []
-        for field_name, field in value_fields.items():
-            # All value fields must be nullable, regardless of type.
-            field.blank = True
-            field.null = True
-
-            # All fields should default to null so that it's easy to
-            # identify which field should be canonical.
-            field.default = None
-
-            # Add the field to the class.
-            cls.add_to_class(field_name, field)  # type: ignore
-
-            # Add the field to the list of field type choices.
-            value_field_choices.append(
-                (field_name, str(field.__class__.__name__),
-                 ))
-
-        # Add a _value_field field to help with routing.
-        cls.add_to_class(f'_{name}_field', model_fields.CharField(  # type: ignore
-            choices=sorted(value_field_choices),
-            max_length=len(max(dict(value_field_choices).keys(), key=len)),
-            default=''
-        ))
-
-        def _value_type_getter(model: Model) -> str:
-            return str(getattr(model, f'_{name}_field'))
-
-        def _value_type_setter(model: Model, field_type: Union[Field, Type[Field]]) -> None:
-            value_field_name = f'_' + (
-                field_type.__class__.__name__
-                if isinstance(field_type, Field)
-                else field_type.__name__
-            ).lower() + '_value'
-
-            setattr(model, f'_{name}_field', value_field_name)
-
-        # Add a set_type method to the class.
-        cls.add_to_class(  # type: ignore
-            f'{name}_type',
-            property(fget=_value_type_getter, fset=_value_type_setter)
-        )
-
-        def _value_getter(model: Model) -> Any:
-            """Get the value from the appropriate value field."""
-            if not model._value_field:  # type: ignore
-                raise KeyError('The model does not have a _value_field set.')
-            return getattr(model, model._value_field)  # type: ignore
-
-        def _value_setter(model: Model, value: Any) -> None:
-            """Set the appropriate value field to the given value.
-
-            Args:
-                model(Model): The model instance on which to set the value.
-                value(Any): The value to set.
-            """
-            if not model._value_field:  # type: ignore
-                raise KeyError('The model does not have a _value_field set.')
-
-            # Nullify other values before setting the new one (for safety).
-            for field_name in value_fields.keys():
-                setattr(model, field_name, None)
-
-            setattr(model, model._value_field, value)  # type: ignore
-
-        # Add a property for accessing the appropriate field.
-        cls.add_to_class(name, property(fget=_value_getter,
-                                        fset=_value_setter))  # type: ignore

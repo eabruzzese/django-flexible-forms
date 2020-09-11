@@ -144,7 +144,7 @@ def test_form_lifecycle() -> None:
 
 @settings(deadline=None, suppress_health_check=(HealthCheck.too_slow,))
 @given(st.data())
-@pytest.mark.timeout(60)
+@pytest.mark.timeout(120)
 @pytest.mark.django_db
 def test_record(
     patch_field_strategies: ContextManagerFixture,
@@ -211,9 +211,6 @@ def test_record(
 
         # Re-fetch the record so that we can test prefetching.
         record = CustomRecord.objects.get(pk=record.pk)
-
-        # Assert that the Record has one attribute per field type.
-        assert record.attributes.count() == len(FIELDS_BY_KEY)
 
         # Assert that each field value can be retrieved from the database and
         # that it matches the value in the form's cleaned_data construct.

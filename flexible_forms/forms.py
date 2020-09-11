@@ -2,16 +2,14 @@
 
 import datetime
 from typing import Any, Dict, Mapping, Optional, cast
+from django.forms.fields import FileField
 
 import swapper
 from django import forms
 from django.core.files.base import File
 from django.db import transaction
 
-from flexible_forms.models import RecordAttribute
-
 Record = swapper.load_model('flexible_forms', 'Record')
-RecordAttribute = swapper.load_model('flexible_forms', 'RecordAttribute')
 
 
 class RecordForm(forms.ModelForm):
@@ -28,49 +26,36 @@ class RecordForm(forms.ModelForm):
         self,
         data: Optional[Mapping[str, Any]] = None,
         files: Optional[Mapping[str, File]] = None,
-        *args: Any,
+        instance: Optional[Record] = None,
+        initial: Optional[Mapping[str, Any]] = None,
         **kwargs: Any
     ) -> None:
-        instance = kwargs.get('instance', None)
-        data = data or kwargs.get('data', {})
-        files = files or kwargs.get('files', {})
-
-        # If an instance was supplied, merge its data/files with any data/files
-        # given to the form constructor.
-        if instance:
-            # Merge any submitted data into the existing instance data.
-            data = {
-                **instance.data,
-                'form': instance.form,
-                **{
-                    k: data.get(k)
-                    for k in data.keys()
-                    if k in self.declared_fields.keys()
-                }
-            }
-
-            # Merge any submitted files into the existing file-type values from
-            # the instance data.
-            files = {
-                **{
-                    k: v
-                    for k, v in instance.data.items()
-                    if isinstance(v, File)
-                },
-                **files
-            }
-
-        super().__init__(data, files, *args, **kwargs)
+        initial_data = {
+            **(instance.data if instance else {}),
+            **(initial or {})
+        }
+        super().__init__(data=data, files=files,
+                         instance=instance, initial=initial_data, **kwargs)
 
     def clean(self) -> Dict[str, Any]:
         """Clean the form data before saving."""
         cleaned_data = super().clean()
 
         for key, value in cleaned_data.items():
+            field = {
+                **self.base_fields,
+                **self.declared_fields
+            }.get(key)
+
             # Time-only values cannot be timezone aware, so we remove the
             # timezone if one is given.
             if isinstance(value, datetime.time):
                 value = value.replace(tzinfo=None)
+
+            # If a False value is given for a FileField, it means that the file
+            # should be cleared, and its value set to None.
+            if isinstance(field, FileField) and value is False:
+                value = None
 
             # Replace the value in cleaned_data with the updated value.
             cleaned_data[key] = value
@@ -91,25 +76,20 @@ class RecordForm(forms.ModelForm):
         """
         record = cast(Record, super().save(commit=False))
 
+        # If nothing has changed, noop and return the record as-is.
+        if not self.has_changed():
+            return record
+
+        # Update any changed attributes.
+        for field_name in self.changed_data:
+            cleaned_value = self.cleaned_data[field_name]
+
+            if field_name in self._meta.fields:
+                setattr(record, field_name, cleaned_value)
+            else:
+                record.set_attribute(field_name, cleaned_value)
+
         if commit:
             record.save()
 
-        form = self.cleaned_data['form']
-
-        # Regenerate the record's attributes.
-        record.attributes.all().delete()
-
-        attributes = []
-        for field in form.fields.all():
-            attribute = RecordAttribute(
-                record=record,
-                field=field,
-            )
-            attribute.value_type = field.as_model_field()
-            attribute.value = self.cleaned_data.get(field.machine_name)
-            attributes.append(attribute)
-
-        RecordAttribute.objects.bulk_create(attributes)
-
-        # Re-fetch the Record instance.
-        return Record.objects.get(pk=record.pk)
+        return record

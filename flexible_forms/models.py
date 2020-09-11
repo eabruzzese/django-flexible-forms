@@ -7,6 +7,7 @@ import logging
 from collections import defaultdict
 from typing import Mapping, Optional, TYPE_CHECKING, Any, Dict, Tuple
 from django.core.files.base import File
+from django.utils.functional import cached_property
 
 import swapper
 from django.core.serializers.json import DjangoJSONEncoder
@@ -14,8 +15,7 @@ from django.db import models
 from django import forms
 from django.utils.text import slugify
 
-from flexible_forms.fields import FIELDS_BY_KEY, ValueRouter
-from flexible_forms.utils import evaluate_expression
+from flexible_forms.fields import FIELDS_BY_KEY
 
 try:
     from django.db.models import JSONField
@@ -108,7 +108,11 @@ class BaseForm(models.Model):
         class_name = self.machine_name.title().replace('_', '')
         form_class_name = f'{class_name}Form'
         all_fields = self.fields.all()
-        field_values = {**instance_data, **data, **files}
+        field_values = {
+            **instance_data,
+            **({k: data.get(k) for k in data.keys()}),
+            **({k: files.get(k) for k in files.keys()}),
+        }
 
         # Generate the initial list of fields that comprise the form.
         form_fields = {
@@ -295,7 +299,7 @@ class BaseField(models.Model):
         """
         return FIELDS_BY_KEY[self.field_type].as_model_field(**{
             'null': not self.required,
-            'blank': not self.label,
+            'blank': not self.required,
             'default': self.initial,
             'help_text': self.help_text,
             **self.model_field_options,
@@ -398,35 +402,6 @@ class BaseFieldModifier(models.Model):
     class Meta:
         abstract = True
 
-    def apply(self, field: BaseField, field_values: Optional[Mapping[str, Any]] = None) -> Tuple[BaseField, str]:
-        """Apply the modifier to the given field.
-
-        Evaluates the configured `value_expression` and applies the resulting
-        value to the configured attribute_name on the given Field instance.
-
-        Args:
-            field (BaseField): The field for which to apply the modifier.
-            field_values (Mapping[str, Any]): The field_values to use when evaluating the
-                `value_expression`.
-
-        Returns:
-            Tuple[BaseField, str]:
-        """
-        error = None
-
-        try:
-            # Evaluate the expression and set the attribute specified by
-            # `self.attribute_name` to the value it returns.
-            attribute_value = evaluate_expression(
-                self.value_expression, names=field_values)
-            setattr(field, self.attribute_name, attribute_value)
-        except BaseException as ex:
-            error = str(ex)
-            if field_values:
-                logger.warn(error)
-
-        return field, error
-
 
 class FieldModifier(BaseFieldModifier):
     """A concrete implementation of FieldModifier."""
@@ -454,7 +429,7 @@ class RecordManager(models.Manager):
         return (
             super().get_queryset()
             .select_related('form')
-            .prefetch_related('attributes__field')
+            .prefetch_related('form__fields', 'attributes__field')
         )
 
 
@@ -478,6 +453,13 @@ class BaseRecord(models.Model):
         return f'{self.form} {self.pk}'
 
     @property
+    def fields(self) -> Mapping[str, BaseField]:
+        return {
+            f.machine_name: f
+            for f in self.form.fields.all()
+        }
+
+    @cached_property
     def data(self) -> Dict[str, Any]:
         """Return a dict of Record attributes and their values.
 
@@ -485,9 +467,50 @@ class BaseRecord(models.Model):
             Dict[str, Any]: A dict of Record attributes and their values.
         """
         return {
-            a.field.machine_name: a.value
-            for a in self.attributes.all()
+            **{
+                name: field.initial
+                for name, field in self.fields.items()
+            },
+            **{
+                a.field.machine_name: a.value
+                for a in self.attributes.all()
+            }
         }
+
+    def set_attribute(self, field_name: str, value: Any) -> None:
+        """Set an attribute of the record to the given value.
+
+        Args:
+            field_name (str): The name of the attribute to set.
+            value (Any): The value.
+        """
+        print(f'{field_name=},{value=}')
+        if not self.pk:
+            self.save()
+
+        RecordAttribute = swapper.load_model(
+            'flexible_forms', 'RecordAttribute')
+        RecordAttribute.objects.update_or_create(
+            record=self,
+            field=self.fields[field_name],
+            defaults={
+                'value': value
+            }
+        )
+
+        self._invalidate_cache()
+
+    def _invalidate_cache(self) -> None:
+        """Invalidate any cached properties on the instance."""
+        try:
+            del self.data
+        except AttributeError:
+            pass
+
+    def save(self, *args, **kwargs) -> None:
+        """Save the record and invalidate the property caches."""
+        super().save(*args, **kwargs)
+        self._invalidate_cache()
 
 
 class Record(BaseRecord):
@@ -514,11 +537,25 @@ class BaseRecordAttribute(models.Model):
         related_name='attributes',
     )
 
-    # Use our ValueRouter to store different types of data while maintaining
-    # data integrity and constraints at the database level.
-    value = ValueRouter(types=(
-        f.as_model_field() for f in FIELDS_BY_KEY.values()
-    ))
+    def _get_value(self) -> Any:
+        return getattr(self, f'_{self.field.field_type}_value')
+
+    def _set_value(self, new_value: Any) -> Any:
+        setattr(self, f'_{self.field.field_type}_value', new_value)
+
+    value = property(_get_value, _set_value)
+
+
+##
+# Add individual fields for each supported datatype to BaseRecordAttribute.
+#
+# The EAV pattern used for storing form submissions (Records) achieves lossless
+# storage by creating a column of an appropriate datatype for each supported
+# field.
+#
+for key, field in sorted(FIELDS_BY_KEY.items(), key=lambda f: f[0]):
+    BaseRecordAttribute.add_to_class(
+        f'_{key}_value', field.as_model_field(blank=True, null=True, default=None))
 
 
 class RecordAttribute(BaseRecordAttribute):
