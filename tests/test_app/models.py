@@ -1,12 +1,14 @@
+# -*- coding: utf-8 -*-
 import uuid
 
 from django.db import models
 
 from flexible_forms.models import (
-    BaseField, BaseFieldModifier,
+    BaseField,
+    BaseFieldModifier,
     BaseForm,
     BaseRecord,
-    BaseRecordAttribute
+    BaseRecordAttribute,
 )
 
 
@@ -29,20 +31,25 @@ class CustomBaseModel(models.Model):
 
 
 class CustomForm(BaseForm, CustomBaseModel):
-    """A customized and swapped-out version of the Form provided by flexible_forms."""
+    """A customized and swapped-out version of the Form provided by
+    flexible_forms."""
 
 
 class CustomField(BaseField, CustomBaseModel):
-    """A customized and swapped-out version of the Field provided by flexible_forms."""
+    """A customized and swapped-out version of the Field provided by
+    flexible_forms."""
 
 
 class CustomRecord(BaseRecord, CustomBaseModel):
-    """A customized and swapped-out version of the Record provided by flexible_forms."""
+    """A customized and swapped-out version of the Record provided by
+    flexible_forms."""
 
 
 class CustomRecordAttribute(BaseRecordAttribute, CustomBaseModel):
-    """A customized and swapped-out version of the RecordAttribute provided by flexible_forms."""
+    """A customized and swapped-out version of the RecordAttribute provided by
+    flexible_forms."""
 
 
 class CustomFieldModifier(BaseFieldModifier, CustomBaseModel):
-    """A customized and swapped-out version of the RecordAttribute provided by flexible_forms."""
+    """A customized and swapped-out version of the RecordAttribute provided by
+    flexible_forms."""

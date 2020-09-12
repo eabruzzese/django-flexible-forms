@@ -2,11 +2,20 @@
 
 """Common utilities."""
 
-from typing import Any, Callable, Mapping, Optional, Sequence, Set, Type, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Type,
+    TypeVar,
+)
 
 from simpleeval import DEFAULT_FUNCTIONS, simple_eval
 
-T = TypeVar('T', bound=Type)
+T = TypeVar("T", bound=Type)
 
 
 def all_subclasses(cls: T) -> Set[T]:
@@ -20,9 +29,9 @@ def all_subclasses(cls: T) -> Set[T]:
     Returns:
         Set[Type[Any]]: The set of all descendants of `cls`.
     """
-    return set(cls.__subclasses__()).union([
-        s for c in cls.__subclasses__() for s in all_subclasses(c)
-    ])
+    return set(cls.__subclasses__()).union(
+        [s for c in cls.__subclasses__() for s in all_subclasses(c)]
+    )
 
 
 def empty(value: Any, empty_values: Sequence = (None,)) -> bool:
@@ -37,7 +46,7 @@ def empty(value: Any, empty_values: Sequence = (None,)) -> bool:
     Returns:
         bool: True if the given value is empty.
     """
-    if hasattr(value, '__iter__'):
+    if hasattr(value, "__iter__"):
         try:
             next(iter(value))
         except StopIteration:
@@ -47,7 +56,21 @@ def empty(value: Any, empty_values: Sequence = (None,)) -> bool:
     return value in empty_values
 
 
-def evaluate_expression(expression: str, cast: Optional[Callable[..., Any]] = None, names: Optional[Mapping[str, Any]] = None) -> Any:
+def evaluate_expression(
+    expression: str,
+    cast: Optional[
+        Callable[
+            ...,
+            Any,
+        ]
+    ] = None,
+    names: Optional[
+        Mapping[
+            str,
+            Any,
+        ]
+    ] = None,
+) -> Any:
     """Safely evaluate a Python expression.
 
     Evaluates a Python expression in a controlled environment.
@@ -64,9 +87,13 @@ def evaluate_expression(expression: str, cast: Optional[Callable[..., Any]] = No
     """
     cast = cast or (lambda v: v)
 
-    value = simple_eval(expression, names=names, functions={
-        **DEFAULT_FUNCTIONS.copy(),
-        'empty': empty,
-    })
+    value = simple_eval(
+        expression,
+        names=names,
+        functions={
+            **DEFAULT_FUNCTIONS.copy(),
+            "empty": empty,
+        },
+    )
 
     return cast(value)

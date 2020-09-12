@@ -15,5 +15,5 @@ class FlexibleFormsConfig(AppConfig):
     Handles initialization logic for the flexible_forms app.
     """
 
-    name = 'flexible_forms'
-    verbose_name = 'Flexible Forms'
+    name = "flexible_forms"
+    verbose_name = "Flexible Forms"

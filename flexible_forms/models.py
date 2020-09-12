@@ -3,22 +3,20 @@
 """Model definitions for the flexible_forms module."""
 
 import logging
-
-from collections import defaultdict
-from typing import Mapping, Optional, TYPE_CHECKING, Any, Dict, Tuple
-from django.core.files.base import File
-from django.utils.functional import cached_property
+from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional, Type
 
 import swapper
+from django import forms
+from django.core.files.base import File
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
-from django import forms
+from django.utils.functional import cached_property
 from django.utils.text import slugify
 
 from flexible_forms.fields import FIELDS_BY_KEY
 
 try:
-    from django.db.models import JSONField
+    from django.db.models import JSONField  # type: ignore
 except ImportError:
     from django.contrib.postgres.fields import JSONField
 
@@ -39,7 +37,7 @@ logger = logging.getLogger(__name__)
 #
 FIELD_TYPE_OPTIONS = sorted(
     ((k, v.label) for k, v in FIELDS_BY_KEY.items()),
-    key=lambda o: o[0]
+    key=lambda o: o[0],
 )
 
 
@@ -47,15 +45,18 @@ class BaseForm(models.Model):
     """A model representing a single type of customizable form."""
 
     label = models.TextField(
-        blank=True, default='', help_text='The human-friendly name of the form.')
+        blank=True,
+        default="",
+        help_text="The human-friendly name of the form.",
+    )
     machine_name = models.TextField(
         blank=True,
         help_text=(
-            'The machine-friendly name of the form. Computed automatically '
-            'from the label if not specified.'
+            "The machine-friendly name of the form. Computed automatically "
+            "from the label if not specified."
         ),
     )
-    description = models.TextField(blank=True, default='')
+    description = models.TextField(blank=True, default="")
 
     class Meta:
         abstract = True
@@ -72,9 +73,7 @@ class BaseForm(models.Model):
             args: (Passed to super)
             kwargs: (Passed to super)
         """
-        self.machine_name = (
-            self.machine_name or slugify(self.label).replace('-', '_')
-        )
+        self.machine_name = self.machine_name or slugify(self.label).replace("-", "_")
 
         super().save(*args, **kwargs)
 
@@ -82,9 +81,9 @@ class BaseForm(models.Model):
         self,
         data: Optional[Mapping[str, Any]] = None,
         files: Optional[Mapping[str, File]] = None,
-        instance: Optional['Record'] = None,
-        **kwargs: Any
-    ) -> 'RecordForm':
+        instance: Optional["BaseRecord"] = None,
+        **kwargs: Any,
+    ) -> "RecordForm":
         """Return the form represented as a Django form instance.
 
         Args:
@@ -92,7 +91,7 @@ class BaseForm(models.Model):
                 Django form constructor.
             files (Optional[Mapping[str, File]]): Data to be passed to the
                 Django form constructor.
-            instance (Optional[Record]): The Record instance to be passed to
+            instance (Optional[BaseRecord]): The Record instance to be passed to
                 the Django form constructor.
 
         Returns:
@@ -105,9 +104,9 @@ class BaseForm(models.Model):
         # The RecordForm is imported inline to prevent a circular import.
         from flexible_forms.forms import RecordForm
 
-        class_name = self.machine_name.title().replace('_', '')
-        form_class_name = f'{class_name}Form'
-        all_fields = self.fields.all()
+        class_name = self.machine_name.title().replace("_", "")
+        form_class_name = f"{class_name}Form"
+        all_fields = self.fields.all()  # type: ignore
         field_values = {
             **instance_data,
             **({k: data.get(k) for k in data.keys()}),
@@ -115,9 +114,7 @@ class BaseForm(models.Model):
         }
 
         # Generate the initial list of fields that comprise the form.
-        form_fields = {
-            f.machine_name: f.as_form_field() for f in all_fields
-        }
+        form_fields = {f.machine_name: f.as_form_field() for f in all_fields}
 
         # Normalize the field values to ensure they are all cast to their
         # appropriate types (as defined by their corresponding form fields).
@@ -128,18 +125,24 @@ class BaseForm(models.Model):
         # Regenerate the form fields, this time taking the field values into
         # account in order to inform any dynamic behaviors.
         form_fields = {
-            f.machine_name: f.as_form_field(field_values=field_values) for f in all_fields
+            f.machine_name: f.as_form_field(
+                field_values=field_values,
+            )
+            for f in all_fields
         }
 
         # Dynamically generate a form class containing all of the fields.
-        form_class = type(form_class_name, (RecordForm,), {
-            '__module__': self.__module__,
-            **form_fields
-        })
+        form_class: Type[RecordForm] = type(
+            form_class_name,
+            (RecordForm,),
+            {
+                "__module__": self.__module__,
+                **form_fields,
+            },
+        )
 
         # Create a form instance from the form class and the passed parameters.
-        form_instance = form_class(
-            data=data, files=files, instance=instance, **kwargs)
+        form_instance = form_class(data=data, files=files, instance=instance, **kwargs)
 
         return form_instance
 
@@ -148,7 +151,7 @@ class Form(BaseForm):
     """A swappable concrete implementation of a flexible form."""
 
     class Meta:
-        swappable = swapper.swappable_setting('flexible_forms', 'Form')
+        swappable = swapper.swappable_setting("flexible_forms", "Form")
 
 
 class BaseField(models.Model):
@@ -159,74 +162,70 @@ class BaseField(models.Model):
     """
 
     label = models.TextField(
-        help_text='The label to be displayed for this field in the form.',
+        help_text="The label to be displayed for this field in the form.",
     )
 
     machine_name = models.TextField(
         blank=True,
         help_text=(
-            'The machine-friendly name of the field. Computed automatically '
-            'from the label if not specified.'
+            "The machine-friendly name of the field. Computed automatically "
+            "from the label if not specified."
         ),
     )
 
     label_suffix = models.TextField(
         blank=True,
-        default='',
-        help_text=(
-            'The character(s) at the end of the field label (e.g. "?" or ":").'
-        ),
+        default="",
+        help_text=('The character(s) at the end of the field label (e.g. "?" or ":").'),
     )
 
     help_text = models.TextField(
         blank=True,
-        default='',
-        help_text='Text to help the user fill out the field.',
+        default="",
+        help_text="Text to help the user fill out the field.",
     )
 
     required = models.BooleanField(
         default=False,
-        help_text='If True, requires a value be present in the field.',
+        help_text="If True, requires a value be present in the field.",
     )
 
     initial = models.TextField(
         blank=True,
-        default='',
-        help_text=(
-            'The default value if no value is given during initialization.'
-        ),
+        default="",
+        help_text=("The default value if no value is given during initialization."),
     )
 
     field_type = models.TextField(
         choices=FIELD_TYPE_OPTIONS,
-        help_text='The form widget to use when displaying the field.',
+        help_text="The form widget to use when displaying the field.",
     )
 
     model_field_options = JSONField(
         blank=True,
         default=dict,
-        help_text='Custom arguments passed to the model field constructor.',
-        encoder=DjangoJSONEncoder
+        help_text="Custom arguments passed to the model field constructor.",
+        encoder=DjangoJSONEncoder,
     )
 
     form_field_options = JSONField(
         blank=True,
         default=dict,
-        help_text='Custom arguments passed to the form field constructor.',
-        encoder=DjangoJSONEncoder
+        help_text="Custom arguments passed to the form field constructor.",
+        encoder=DjangoJSONEncoder,
     )
 
     form_widget_options = JSONField(
         blank=True,
         default=dict,
-        help_text='Custom arguments passed to the form widget constructor.',
-        encoder=DjangoJSONEncoder
+        help_text="Custom arguments passed to the form widget constructor.",
+        encoder=DjangoJSONEncoder,
     )
 
     form = models.ForeignKey(
-        swapper.get_model_name('flexible_forms', 'Form'),
+        swapper.get_model_name("flexible_forms", "Form"),
         on_delete=models.CASCADE,
-        related_name='fields',
+        related_name="fields",
         editable=False,
     )
 
@@ -246,11 +245,11 @@ class BaseField(models.Model):
 
     class Meta:
         abstract = True
-        unique_together = ('form', 'machine_name')
-        order_with_respect_to = 'form'
+        unique_together = ("form", "machine_name")
+        order_with_respect_to = "form"
 
     def __str__(self) -> str:
-        return f'Field `{self.label}` (type {self.field_type}, form ID {self.form_id})'
+        return f"Field `{self.label}` (type {self.field_type}, form ID {self.form_id})"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save the model.
@@ -262,34 +261,37 @@ class BaseField(models.Model):
             args: (Passed to super)
             kwargs: (Passed to super)
         """
-        self.machine_name = (
-            self.machine_name or slugify(self.label).replace('-', '_')
-        )
+        self.machine_name = self.machine_name or slugify(self.label).replace("-", "_")
 
         super().save(*args, **kwargs)
 
-    def as_form_field(self, field_values: Optional[Mapping[str, Any]] = None) -> forms.Field:
+    def as_form_field(
+        self,
+        field_values: Optional[Mapping[str, Any]] = None,
+    ) -> forms.Field:
         """Return a Django form Field definition.
 
         Returns:
             forms.Field: The configured Django form Field instance.
         """
-        return FIELDS_BY_KEY[self.field_type].as_form_field(**{
-            # Special parameters.
-            'field_modifiers': (
-                (m.attribute_name, m.value_expression)
-                for m in self.field_modifiers.all()
-            ),
-            'field_values': field_values,
-            'form_widget_options': self.form_widget_options,
-            # Django form field arguments.
-            'required': self.required,
-            'label': self.label,
-            'label_suffix': self.label_suffix,
-            'initial': self.initial,
-            'help_text': self.help_text,
-            **self.form_field_options,
-        })
+        return FIELDS_BY_KEY[self.field_type].as_form_field(
+            **{
+                # Special parameters.
+                "field_modifiers": (
+                    (m.attribute_name, m.value_expression)
+                    for m in self.field_modifiers.all()  # type: ignore
+                ),
+                "field_values": field_values,
+                "form_widget_options": self.form_widget_options,
+                # Django form field arguments.
+                "required": self.required,
+                "label": self.label,
+                "label_suffix": self.label_suffix,
+                "initial": self.initial,
+                "help_text": self.help_text,
+                **self.form_field_options,
+            }
+        )
 
     def as_model_field(self) -> models.Field:
         """Return a Django model Field definition.
@@ -297,50 +299,22 @@ class BaseField(models.Model):
         Returns:
             models.Field: The configured Django model Field instance.
         """
-        return FIELDS_BY_KEY[self.field_type].as_model_field(**{
-            'null': not self.required,
-            'blank': not self.required,
-            'default': self.initial,
-            'help_text': self.help_text,
-            **self.model_field_options,
-        })
-
-    def apply_modifiers(self, field_values: Optional[Mapping[str, Any]] = None) -> Tuple['Field', Mapping[str, str]]:
-        """Return the field with its modifiers applied.
-
-        Applies all of the field's configured modifiers one by one until all
-        of them have been evaluated.
-
-        Args:
-            field (BaseField): The field to modify.
-            field_values (Optional[Mapping[str, Any]]): The field_values to pass to the
-                `apply()` method of each modifier.
-
-        Returns:
-            Tuple[Field, Mapping[str, str]]: A tuple containing the modified
-                field and a list of any errors that occurred while evaluating
-                the modifiers.
-        """
-        field = self
-        errors = defaultdict(set)
-
-        for field_modifier in self.field_modifiers.all():
-            field, error = field_modifier.apply(
-                self, field_values=field_values)
-
-            # If any errors were encountered while evaluating the expression,
-            # add them to the collection.
-            if error:
-                errors[field_modifier.attribute_name].add(error)
-
-        return field, errors
+        return FIELDS_BY_KEY[self.field_type].as_model_field(
+            **{
+                "null": not self.required,
+                "blank": not self.required,
+                "default": self.initial,
+                "help_text": self.help_text,
+                **self.model_field_options,
+            }
+        )
 
 
 class Field(BaseField):
     """A concrete implementation of Field."""
 
     class Meta:
-        swappable = swapper.swappable_setting('flexible_forms', 'Field')
+        swappable = swapper.swappable_setting("flexible_forms", "Field")
 
 
 class BaseFieldModifier(models.Model):
@@ -375,24 +349,24 @@ class BaseFieldModifier(models.Model):
     * Hiding a field until another field changes.
     """
 
-    ATTRIBUTE_HIDDEN = 'hidden'
-    ATTRIBUTE_LABEL = 'label'
-    ATTRIBUTE_HELP_TEXT = 'help_text'
-    ATTRIBUTE_REQUIRED = 'required'
-    ATTRIBUTE_INITIAL = 'initial'
+    ATTRIBUTE_HIDDEN = "hidden"
+    ATTRIBUTE_LABEL = "label"
+    ATTRIBUTE_HELP_TEXT = "help_text"
+    ATTRIBUTE_REQUIRED = "required"
+    ATTRIBUTE_INITIAL = "initial"
 
     SUPPORTED_ATTRIBUTES = (
-        (ATTRIBUTE_HIDDEN, 'Hidden'),
-        (ATTRIBUTE_LABEL, 'Label'),
-        (ATTRIBUTE_HELP_TEXT, 'Help text'),
-        (ATTRIBUTE_REQUIRED, 'Required'),
-        (ATTRIBUTE_INITIAL, 'Initial value'),
+        (ATTRIBUTE_HIDDEN, "Hidden"),
+        (ATTRIBUTE_LABEL, "Label"),
+        (ATTRIBUTE_HELP_TEXT, "Help text"),
+        (ATTRIBUTE_REQUIRED, "Required"),
+        (ATTRIBUTE_INITIAL, "Initial value"),
     )
 
     field = models.ForeignKey(
-        swapper.get_model_name('flexible_forms', 'Field'),
+        swapper.get_model_name("flexible_forms", "Field"),
         on_delete=models.CASCADE,
-        related_name='field_modifiers',
+        related_name="field_modifiers",
         editable=False,
     )
 
@@ -408,7 +382,9 @@ class FieldModifier(BaseFieldModifier):
 
     class Meta:
         swappable = swapper.swappable_setting(
-            'flexible_forms', 'FieldModifier')
+            "flexible_forms",
+            "FieldModifier",
+        )
 
 
 class RecordManager(models.Manager):
@@ -418,18 +394,19 @@ class RecordManager(models.Manager):
     relationships.
     """
 
-    def get_queryset(self) -> models.QuerySet['Record']:
+    def get_queryset(self) -> "models.QuerySet[BaseRecord]":
         """Define the default QuerySet for fetching Records.
 
         Eagerly fetches often-used relationships automatically.
 
         Returns:
-            models.QuerySet['Record']: An optimized queryset of Records.
+            models.QuerySet['BaseRecord']: An optimized queryset of Records.
         """
         return (
-            super().get_queryset()
-            .select_related('form')
-            .prefetch_related('form__fields', 'attributes__field')
+            super()
+            .get_queryset()
+            .select_related("form")
+            .prefetch_related("form__fields", "attributes__field")
         )
 
 
@@ -437,9 +414,9 @@ class BaseRecord(models.Model):
     """An instance of a Form."""
 
     form = models.ForeignKey(
-        swapper.get_model_name('flexible_forms', 'Form'),
+        swapper.get_model_name("flexible_forms", "Form"),
         on_delete=models.CASCADE,
-        related_name='records',
+        related_name="records",
     )
 
     objects = RecordManager()
@@ -449,15 +426,12 @@ class BaseRecord(models.Model):
 
     def __str__(self) -> str:
         if not self.form_id or not self.pk:
-            return 'Unsaved Record'
-        return f'{self.form} {self.pk}'
+            return "Unsaved Record"
+        return f"{self.form} {self.pk}"
 
     @property
     def fields(self) -> Mapping[str, BaseField]:
-        return {
-            f.machine_name: f
-            for f in self.form.fields.all()
-        }
+        return {f.machine_name: f for f in self.form.fields.all()}
 
     @cached_property
     def data(self) -> Dict[str, Any]:
@@ -467,14 +441,11 @@ class BaseRecord(models.Model):
             Dict[str, Any]: A dict of Record attributes and their values.
         """
         return {
-            **{
-                name: field.initial
-                for name, field in self.fields.items()
-            },
+            **{name: field.initial for name, field in self.fields.items()},
             **{
                 a.field.machine_name: a.value
-                for a in self.attributes.all()
-            }
+                for a in self.attributes.all()  # type: ignore
+            },
         }
 
     def set_attribute(self, field_name: str, value: Any) -> None:
@@ -484,18 +455,19 @@ class BaseRecord(models.Model):
             field_name (str): The name of the attribute to set.
             value (Any): The value.
         """
-        print(f'{field_name=},{value=}')
         if not self.pk:
             self.save()
 
         RecordAttribute = swapper.load_model(
-            'flexible_forms', 'RecordAttribute')
+            "flexible_forms",
+            "RecordAttribute",
+        )
         RecordAttribute.objects.update_or_create(
             record=self,
             field=self.fields[field_name],
             defaults={
-                'value': value
-            }
+                "value": value,
+            },
         )
 
         self._invalidate_cache()
@@ -507,7 +479,7 @@ class BaseRecord(models.Model):
         except AttributeError:
             pass
 
-    def save(self, *args, **kwargs) -> None:
+    def save(self, *args: Any, **kwargs: Any) -> None:
         """Save the record and invalidate the property caches."""
         super().save(*args, **kwargs)
         self._invalidate_cache()
@@ -517,32 +489,90 @@ class Record(BaseRecord):
     """The default Record implementation."""
 
     class Meta:
-        swappable = swapper.swappable_setting('flexible_forms', 'Record')
+        swappable = swapper.swappable_setting("flexible_forms", "Record")
 
 
 class BaseRecordAttribute(models.Model):
     """A value for an attribute on a single Record."""
 
+    ##
+    # _VALUE_FIELD_PREFIX
+    #
+    # A prefix used to denote value fields for the attribute.
+    #
+    _VALUE_FIELD_PREFIX = "_value_"
+
     class Meta:
         abstract = True
 
     record = models.ForeignKey(
-        swapper.get_model_name('flexible_forms', 'Record'),
+        swapper.get_model_name("flexible_forms", "Record"),
         on_delete=models.CASCADE,
-        related_name='attributes',
+        related_name="attributes",
     )
     field = models.ForeignKey(
-        swapper.get_model_name('flexible_forms', 'Field'),
+        swapper.get_model_name("flexible_forms", "Field"),
         on_delete=models.CASCADE,
-        related_name='attributes',
+        related_name="attributes",
     )
 
+    @classmethod
+    def get_value_field_name(cls, field_type: str) -> str:
+        """Return the name of the field used for storing field_type values.
+
+        Args:
+            field_type (str): The field type.
+
+        Returns:
+            str: The name of the model field for storing field_type values.
+        """
+        return f"{cls._VALUE_FIELD_PREFIX}{field_type}"
+
+    @property
+    def value_field_name(self) -> str:
+        """Return the name of the field that holds the attribute value.
+
+        Values are stored in columns with appropriate typings for performance
+        and lossless storage.
+
+        Returns:
+            str: The name of the field that holds the value for the attribute.
+        """
+        return self.get_value_field_name(self.field.field_type)
+
     def _get_value(self) -> Any:
-        return getattr(self, f'_{self.field.field_type}_value')
+        """Return the attribute value.
 
-    def _set_value(self, new_value: Any) -> Any:
-        setattr(self, f'_{self.field.field_type}_value', new_value)
+        Returns:
+            Any: The current value of the attribute.
+        """
+        return getattr(self, self.value_field_name)
 
+    def _set_value(self, new_value: Any) -> None:
+        """Set the value of the attribute.
+
+        Sets the value of the attribute to the given value.
+
+        Args:
+            new_value (Any): The new value for the attribute.
+        """
+        # Clear out the
+        value_field_names = (
+            f.name
+            for f in self._meta.get_fields()
+            if f.name.startswith(self._VALUE_FIELD_PREFIX)
+        )
+        for field_name in value_field_names:
+            setattr(self, field_name, None)
+
+        setattr(self, self.value_field_name, new_value)
+
+    ##
+    # value
+    #
+    # A getter and setter property for transparently interacting with the value
+    # of the attribute.
+    #
     value = property(_get_value, _set_value)
 
 
@@ -553,9 +583,11 @@ class BaseRecordAttribute(models.Model):
 # storage by creating a column of an appropriate datatype for each supported
 # field.
 #
-for key, field in sorted(FIELDS_BY_KEY.items(), key=lambda f: f[0]):
-    BaseRecordAttribute.add_to_class(
-        f'_{key}_value', field.as_model_field(blank=True, null=True, default=None))
+for field_type, field in sorted(FIELDS_BY_KEY.items(), key=lambda f: f[0]):
+    BaseRecordAttribute.add_to_class(  # type: ignore
+        BaseRecordAttribute.get_value_field_name(field_type),
+        field.as_model_field(blank=True, null=True, default=None),
+    )
 
 
 class RecordAttribute(BaseRecordAttribute):
@@ -563,4 +595,6 @@ class RecordAttribute(BaseRecordAttribute):
 
     class Meta:
         swappable = swapper.swappable_setting(
-            'flexible_forms', 'RecordAttribute')
+            "flexible_forms",
+            "RecordAttribute",
+        )

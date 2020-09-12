@@ -10,14 +10,13 @@ from typing import (
     Any,
     Callable,
     Generator,
-    Generic,
     Iterator,
     Mapping,
     Optional,
     Type,
     TypeVar,
     Union,
-    cast
+    cast,
 )
 
 import pytest
@@ -32,7 +31,7 @@ from hypothesis.extra.django import register_field_strategy
 from hypothesis.extra.django._fields import _global_field_lookup
 from PIL import Image
 
-T = TypeVar('T')
+T = TypeVar("T")
 Fixture = Generator[T, None, None]
 ContextManagerFixture = Fixture[Callable[..., _GeneratorContextManager]]
 
@@ -54,9 +53,11 @@ def rollback() -> ContextManagerFixture:
         Callable[[], None]: A context manager that will roll back any database changes
             made within its scope.
     """
+
     @contextmanager
     def _rollback() -> Iterator:
-        """Execute a block of code and automatically roll back any database changes."""
+        """Execute a block of code and automatically roll back any database
+        changes."""
         sid = transaction.savepoint()
         try:
             yield
@@ -72,7 +73,7 @@ def rollback() -> ContextManagerFixture:
 def _generate_uploaded_file(
     name: Optional[str] = None,
     content: Optional[bytes] = None,
-    content_type: Optional[str] = None
+    content_type: Optional[str] = None,
 ) -> SimpleUploadedFile:
     """Generate an uploaded file object.
 
@@ -91,12 +92,14 @@ def _generate_uploaded_file(
     """
     return SimpleUploadedFile(
         str(name or uuid.uuid4().hex),
-        content or b'',
-        content_type=(content_type or 'application/octet-stream')
+        content or b"",
+        content_type=(content_type or "application/octet-stream"),
     )
 
 
-def file_strategy(**strategies: st.SearchStrategy) -> st.SearchStrategy[SimpleUploadedFile]:
+def file_strategy(
+    **strategies: st.SearchStrategy,
+) -> st.SearchStrategy[SimpleUploadedFile]:
     """Define a binary file upload generation strategy for Hypothesis.
 
     Args:
@@ -108,8 +111,8 @@ def file_strategy(**strategies: st.SearchStrategy) -> st.SearchStrategy[SimpleUp
             will generate random binary files to simulate file uploads.
     """
     builds_strategies: Mapping[str, st.SearchStrategy] = {
-        'content': st.binary(min_size=1),
-        'content_type': st.just('application/octet-stream'),
+        "content": st.binary(min_size=1),
+        "content_type": st.just("application/octet-stream"),
         **strategies,
     }
 
@@ -117,7 +120,9 @@ def file_strategy(**strategies: st.SearchStrategy) -> st.SearchStrategy[SimpleUp
 
 
 @st.composite
-def image_strategy(draw: Callable[..., Any], **strategies: st.SearchStrategy) -> SimpleUploadedFile:
+def image_strategy(
+    draw: Callable[..., Any], **strategies: st.SearchStrategy
+) -> SimpleUploadedFile:
     """Define an image file upload generation strategy for Hypothesis.
 
     Args:
@@ -131,30 +136,51 @@ def image_strategy(draw: Callable[..., Any], **strategies: st.SearchStrategy) ->
     image = draw(
         st.builds(
             Image.new,
-            mode=st.just('RGB'),
+            mode=st.just("RGB"),
             size=st.tuples(
                 st.integers(min_value=100, max_value=4096),
                 st.integers(min_value=100, max_value=4096),
-            )
-        )
+            ),
+        ),
     )
 
-    # Save the image to a BytesIO buffer with a random PIL-supported image format.
-    image_format = draw(st.sampled_from([
-        'BMP', 'DIB', 'EPS', 'GIF',
-        'IM', 'JPEG', 'MPO', 'PCX',
-        'PNG', 'PPM', 'SPIDER', 'TGA',
-        'TIFF', 'WEBP'
-    ]))
+    # Save the image to a BytesIO buffer with a random PIL-supported image
+    # format.
+    image_format = draw(
+        st.sampled_from(
+            [
+                "BMP",
+                "DIB",
+                "EPS",
+                "GIF",
+                "IM",
+                "JPEG",
+                "MPO",
+                "PCX",
+                "PNG",
+                "PPM",
+                "SPIDER",
+                "TGA",
+                "TIFF",
+                "WEBP",
+            ]
+        ),
+    )
 
     image_bytes = draw(st.just(BytesIO()))
-    draw(st.builds(image.save, st.just(image_bytes), format=st.just(image_format)))
+    draw(
+        st.builds(
+            image.save,
+            st.just(image_bytes),
+            format=st.just(image_format),
+        ),
+    )
 
     # Generate the file using a modified file_strategy.
     builds_strategies: Mapping[str, st.SearchStrategy] = {
-        'name': st.just(f'image.{image_format.lower()}'),
-        'content': st.just(image_bytes.getvalue()),
-        'content_type': st.just(f'image/{image_format.lower()}'),
+        "name": st.just(f"image.{image_format.lower()}"),
+        "content": st.just(image_bytes.getvalue()),
+        "content_type": st.just(f"image/{image_format.lower()}"),
         **strategies,
     }
 
@@ -178,7 +204,7 @@ def using_sqlite() -> bool:
         return None
 
 
-@pytest.fixture(scope='session')
+@pytest.fixture(scope="session")
 def duration_strategy() -> st.SearchStrategy[timedelta]:
     """Handle DurationField values.
 
@@ -195,12 +221,16 @@ def duration_strategy() -> st.SearchStrategy[timedelta]:
     return st.timedeltas()
 
 
-@pytest.fixture(scope='session')
+@pytest.fixture(scope="session")
 def patch_field_strategies() -> ContextManagerFixture:
-    """Return a monkey-patcher for Hypothesis field strategies.
-    """
+    """Return a monkey-patcher for Hypothesis field strategies."""
+
     @contextmanager
-    def _patch_field_strategy(strategies: Mapping[Union[Type[models.Model], Type[forms.Field]], st.SearchStrategy[Any]]) -> Iterator:
+    def _patch_field_strategy(
+        strategies: Mapping[
+            Union[Type[models.Model], Type[forms.Field]], st.SearchStrategy[Any]
+        ],
+    ) -> Iterator:
         """Monkey-patch a Hypothesis field strategy.
 
         Resets the strategy to its original value when finished.
@@ -210,7 +240,8 @@ def patch_field_strategies() -> ContextManagerFixture:
         for field_class, new_strategy in strategies.items():
             # Retrieve the original strategy.
             original_strategies[field_class] = _global_field_lookup.get(
-                field_class)
+                field_class,
+            )
 
             # Patch in the new strategy.
             _global_field_lookup[field_class] = new_strategy
@@ -219,7 +250,8 @@ def patch_field_strategies() -> ContextManagerFixture:
         try:
             yield
 
-        # Revert to the original strategy (or remove it, if there was no original strategy).
+        # Revert to the original strategy (or remove it, if there was no
+        # original strategy).
         finally:
             for field_class, original_strategy in original_strategies.items():
                 del _global_field_lookup[field_class]
@@ -235,8 +267,8 @@ _hypothesis_initialized = False
 def _initialize_hypothesis() -> None:
     """Performs initialization for Hypothesis.
 
-    Registers field generation strategies for types not natively supported by
-    the Hypothesis Django integration.
+    Registers field generation strategies for types not natively
+    supported by the Hypothesis Django integration.
     """
 
     try:

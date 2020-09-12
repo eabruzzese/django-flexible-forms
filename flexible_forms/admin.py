@@ -3,13 +3,12 @@
 """Django admin configurations for flexible_forms."""
 
 import logging
-
-from typing import Any, Optional, cast
+from typing import TYPE_CHECKING, Any, Optional, Type, cast
 
 import swapper
 from django import forms
-from django.contrib import admin
 from django.conf import settings
+from django.contrib import admin
 from django.db import models
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.urls import reverse
@@ -17,52 +16,66 @@ from django.utils.safestring import SafeText, mark_safe
 
 logger = logging.getLogger(__name__)
 
-ModelAdmin = admin.ModelAdmin
-StackedInline = admin.StackedInline
-TabularInline = admin.TabularInline
-
 ##
 # Nested admin support
 #
 # If the project has the nested_admin Django app installed, we'll try to use it
 # so that field modifiers can be configured via the Django Admin.
 #
-if 'nested_admin' in settings.INSTALLED_APPS:
-    from nested_admin.nested import (
-        NestedModelAdmin as ModelAdmin,
-        NestedTabularInline as TabularInline,
-        NestedStackedInline as StackedInline
-    )
+if "nested_admin" in settings.INSTALLED_APPS:
+    from nested_admin.nested import NestedModelAdmin as ModelAdmin
+    from nested_admin.nested import NestedStackedInline as StackedInline
+    from nested_admin.nested import NestedTabularInline as TabularInline
+else:
+    ModelAdmin = admin.ModelAdmin
+    StackedInline = admin.StackedInline
+    TabularInline = admin.TabularInline
 
     # Load our swappable models.
-Field = swapper.load_model('flexible_forms', 'Field')
-FieldModifier = swapper.load_model('flexible_forms', 'FieldModifier')
-Form = swapper.load_model('flexible_forms', 'Form')
-Record = swapper.load_model('flexible_forms', 'Record')
+Field = swapper.load_model("flexible_forms", "Field")
+FieldModifier = swapper.load_model("flexible_forms", "FieldModifier")
+Form = swapper.load_model("flexible_forms", "Form")
+Record = swapper.load_model("flexible_forms", "Record")
+
+if TYPE_CHECKING:
+    from flexible_forms.models import BaseForm, BaseRecord
 
 
 class FieldModifiersInline(TabularInline):
     """An inline representing a single modifier for a field on a form."""
+
     # classes = ('collapse',)
     extra = 1
     model = FieldModifier
 
     formfield_overrides = {
-        models.TextField: {'widget': forms.widgets.TextInput(attrs={'size': '50'})},
+        models.TextField: {
+            "widget": forms.widgets.TextInput(
+                attrs={
+                    "size": "50",
+                },
+            ),
+        },
     }
 
 
 class FieldsInline(StackedInline):
     """An inline representing a single field on a Form."""
 
-    classes = ('collapse',)
-    exclude = ('_order', 'label_suffix')
+    classes = ("collapse",)
+    exclude = ("_order", "label_suffix")
     extra = 1
     model = Field
-    fk_name = 'form'
+    fk_name = "form"
 
     formfield_overrides = {
-        models.TextField: {'widget': forms.widgets.TextInput(attrs={'size': '50'})},
+        models.TextField: {
+            "widget": forms.widgets.TextInput(
+                attrs={
+                    "size": "50",
+                },
+            ),
+        },
     }
 
     inlines = (FieldModifiersInline,)
@@ -72,14 +85,20 @@ class FormsAdmin(ModelAdmin):
     """An admin configuration for managing flexible forms."""
 
     formfield_overrides = {
-        models.TextField: {'widget': forms.widgets.TextInput(attrs={'size': '50'})},
+        models.TextField: {
+            "widget": forms.widgets.TextInput(
+                attrs={
+                    "size": "50",
+                },
+            ),
+        },
     }
 
-    list_display = ('label', '_fields_count', '_records_count', '_add_record')
+    list_display = ("label", "_fields_count", "_records_count", "_add_record")
 
     inlines = (FieldsInline,)
 
-    def get_queryset(self, *args: Any, **kwargs: Any) -> models.QuerySet[Form]:
+    def get_queryset(self, *args: Any, **kwargs: Any) -> "models.QuerySet[BaseForm]":
         """Overrides the default queryset to optimize fetches.
 
         Args:
@@ -89,14 +108,17 @@ class FormsAdmin(ModelAdmin):
         Returns:
             models.QuerySet[Form]: An optimized queryset.
         """
-        return (
-            super()
-            .get_queryset(*args, **kwargs)
-            .annotate(models.Count('records', distinct=True))
-            .annotate(models.Count('fields', distinct=True))
+        return cast(
+            models.QuerySet["BaseForm"],
+            (
+                super()
+                .get_queryset(*args, **kwargs)
+                .annotate(models.Count("records", distinct=True))
+                .annotate(models.Count("fields", distinct=True))
+            ),
         )
 
-    def _fields_count(self, form: Form) -> int:
+    def _fields_count(self, form: "BaseForm") -> int:
         """The number of fields related to this form.
 
         Args:
@@ -107,10 +129,10 @@ class FormsAdmin(ModelAdmin):
         """
         return form.fields__count  # type: ignore
 
-    _fields_count.short_description = 'Fields'  # type: ignore
-    _fields_count.admin_order_field = 'fields__count'  # type: ignore
+    _fields_count.short_description = "Fields"  # type: ignore
+    _fields_count.admin_order_field = "fields__count"  # type: ignore
 
-    def _records_count(self, form: Form) -> SafeText:
+    def _records_count(self, form: "BaseForm") -> SafeText:
         """The number of records related to this form.
 
         Args:
@@ -122,24 +144,31 @@ class FormsAdmin(ModelAdmin):
         app_label = Record._meta.app_label  # noqa: WPS437
         model_name = Record._meta.model_name  # noqa: WPS437
 
-        changelist_url = reverse(f'admin:{app_label}_{model_name}_changelist')
-        filtered_changelist_url = f'{changelist_url}?form_id={form.pk}'
+        changelist_url = reverse(f"admin:{app_label}_{model_name}_changelist")
+        filtered_changelist_url = f"{changelist_url}?form_id={form.pk}"
         record_count = form.records__count  # type: ignore
 
-        return mark_safe(f'<a href="{filtered_changelist_url}">{record_count}</a>')  # noqa: S308, S703, E501
+        return mark_safe(
+            f'<a href="{filtered_changelist_url}">{record_count}</a>'
+        )  # noqa: S308, S703, E501
 
-    _records_count.short_description = 'Records'  # type: ignore
-    _records_count.admin_order_field = 'records__count'  # type: ignore
+    _records_count.short_description = "Records"  # type: ignore
+    _records_count.admin_order_field = "records__count"  # type: ignore
 
-    def _add_record(self, form: Form) -> SafeText:
+    def _add_record(self, form: "BaseForm") -> SafeText:
         app_label = Record._meta.app_label  # noqa: WPS437
         model_name = Record._meta.model_name  # noqa: WPS437
 
-        add_url = reverse(
-            f'admin:{app_label}_{model_name}_add',
-        ) + f'?form_id={form.pk}'
+        add_url = (
+            reverse(
+                f"admin:{app_label}_{model_name}_add",
+            )
+            + f"?form_id={form.pk}"
+        )
 
-        return mark_safe(f'<a href="{add_url}">Add record</a>')  # noqa: S308, S703, E501
+        return mark_safe(
+            f'<a href="{add_url}">Add record</a>'
+        )  # noqa: S308, S703, E501
 
 
 admin.site.register(Form, FormsAdmin)
@@ -149,8 +178,10 @@ class RecordsAdmin(admin.ModelAdmin):
     """An admin configuration for managing records."""
 
     def get_queryset(
-        self, *args: Any, **kwargs: Any,
-    ) -> models.QuerySet[Record]:
+        self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> "models.QuerySet[BaseRecord]":
         """Overrides the default queryset to optimize fetches.
 
         Args:
@@ -158,28 +189,28 @@ class RecordsAdmin(admin.ModelAdmin):
             kwargs: (Passed to super)
 
         Returns:
-            models.QuerySet[Record]: An optimized queryset.
+            models.QuerySet[BaseRecord]: An optimized queryset.
         """
         return (
             super()
             .get_queryset(*args, **kwargs)
-            .prefetch_related('attributes', 'form__fields')
+            .prefetch_related("attributes", "form__fields")
         )
 
     def get_form(
         self,
         request: HttpRequest,
-        obj: Optional[Record] = None,  # noqa: WPS110
+        obj: Optional["BaseRecord"] = None,
         *args: Any,
         **kwargs: Any,
-    ) -> forms.Form:
+    ) -> Type[forms.BaseForm]:
         """Return the Django Form definition for the record.
 
         Generated dynamically if the Record has a form defined.
 
         Args:
             request (HttpRequest): The current HTTP request.
-            obj (Optional[Record]): The record for which to render the form.
+            obj (Optional[BaseRecord]): The record for which to render the form.
             args: (Passed to super)
             kwargs: (Passed to super)
 
@@ -187,10 +218,21 @@ class RecordsAdmin(admin.ModelAdmin):
             forms.Form: The form object to be rendered.
         """
         if obj:
-            return obj.form.as_django_form(request.POST, request.FILES, instance=obj).__class__
+            return (
+                cast(
+                    BaseForm,
+                    obj.form,
+                )
+                .as_django_form(
+                    request.POST,
+                    request.FILES,
+                    instance=obj,
+                )
+                .__class__
+            )
 
         return cast(
-            forms.Form,
+            Type[forms.BaseForm],
             super().get_form(request, obj, *args, **kwargs),
         )
 
@@ -213,7 +255,7 @@ class RecordsAdmin(admin.ModelAdmin):
             HttpResponse: The HTTP response with the rendered view.
         """
         record = None
-        form_id = request.GET.get('form_id')
+        form_id = request.GET.get("form_id")
 
         if form_id:
             record = Record.objects.create(
@@ -223,7 +265,7 @@ class RecordsAdmin(admin.ModelAdmin):
             app_label = record._meta.app_label  # noqa: WPS437
             model_name = record._meta.model_name  # noqa: WPS437
             change_url = reverse(
-                f'admin:{app_label}_{model_name}_change',
+                f"admin:{app_label}_{model_name}_change",
                 args=(record.pk,),
             )
 

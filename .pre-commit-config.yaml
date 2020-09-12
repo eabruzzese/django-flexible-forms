@@ -1,0 +1,120 @@
+repos:
+  # General hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v3.2.0
+    hooks:
+      - id: check-ast
+      - id: check-docstring-first
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-vcs-permalinks
+      - id: check-xml
+      - id: check-yaml
+        args: ["--allow-multiple-documents"]
+        # Ignore helm chart templates, which contain Go template syntax.
+        exclude: >
+          (?x)^(
+            infrastructure/charts/.*\.yaml
+          )
+      - id: debug-statements
+      - id: detect-private-key
+      - id: end-of-file-fixer
+        require_serial: True
+      - id: fix-encoding-pragma
+        require_serial: True
+      - id: forbid-new-submodules
+      - id: name-tests-test
+        args: ["--django"]
+        # Ignore the Django test app.
+        exclude: >
+          (?x)^(
+            tests/manage\.py|
+            tests/test_project/*|
+            tests/test_app/[^\/]+.py|
+            tests/test_app/tests/factories\.py
+          )
+      - id: no-commit-to-branch
+        args: ["--branch", "master"]
+      - id: trailing-whitespace
+        require_serial: True
+
+  ##
+  # autoflake
+  #
+  # Automatically remove unused imports in Python files.
+  #
+  - repo: local
+    hooks:
+      - id: autoflake
+        name: autoflake
+        entry: autoflake
+        args:
+          # Modify files in-place.
+          - "--in-place"
+          # Remove all unused imports (not just the standard library).
+          - "--remove-all-unused-imports"
+          # Ignore __init__.py files (they often serve only as module interfaces
+          # and do not use their imports).
+          - "--ignore-init-module-imports"
+        language: python_venv
+        types: [python]
+        additional_dependencies:
+          - autoflake
+        require_serial: True
+
+  ##
+  # isort
+  #
+  # Ensures that Python imort statements are ordered properly. The preceeding
+  # hook, seed-isort-config, seeds the setup.cfg file with a list of third-
+  # party packages, whose imports are grouped differently.
+  #
+  - repo: https://github.com/asottile/seed-isort-config
+    rev: v2.2.0
+    hooks:
+      - id: seed-isort-config
+        args: ["--settings-path", "services/api/"]
+        require_serial: True
+
+  - repo: https://github.com/timothycrosley/isort
+    rev: 5.5.2
+    hooks:
+      - id: isort
+        args: ["--multi-line=3", "--trailing-comma"]
+        require_serial: True
+
+  - repo: https://github.com/psf/black
+    rev: 20.8b1
+    hooks:
+      - id: black
+        language_version: python3
+
+  ##
+  # docformatter
+  #
+  # Automatically formats docstrings to PEP257 standards.
+  #
+  - repo: https://github.com/myint/docformatter
+    rev: v1.3.1
+    hooks:
+      - id: docformatter-venv
+        require_serial: True
+
+  ##
+  # mypy
+  #
+  # Performs type checking on the Python codebase.
+  #
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v0.782
+    hooks:
+      - id: mypy
+        # We'll need to install our dependencies so that mypy can follow imports, so we use a custom entrypoint.
+        entry: sh -c "poetry install && PYTHONPATH="$PYTHONPATH:$(pwd)/tests/" mypy $@"
+        require_serial: True
+        # Ignore the Django test app.
+        exclude: >
+          (?x)^(
+            tests/.*
+          )
