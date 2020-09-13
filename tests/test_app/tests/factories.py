@@ -6,7 +6,7 @@ import random
 
 import factory
 
-from flexible_forms.fields import FIELDS_BY_KEY
+from flexible_forms.fields import FIELD_TYPES
 
 
 class FieldFactory(factory.django.DjangoModelFactory):
@@ -17,7 +17,7 @@ class FieldFactory(factory.django.DjangoModelFactory):
 
     form = factory.SubFactory("test_app.tests.factories.FormFactory")
     field_type = factory.LazyAttribute(
-        lambda _: random.choice([*FIELDS_BY_KEY.keys()]),
+        lambda _: random.choice([*FIELD_TYPES.keys()]),
     )
     required = False
     label = factory.Faker("sentence")

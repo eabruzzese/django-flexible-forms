@@ -4,13 +4,14 @@
 import datetime
 from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional, cast
 
-import swapper
 from django import forms
 from django.core.files.base import File
 from django.db import transaction
 from django.forms.fields import FileField
 
-Record = swapper.load_model("flexible_forms", "Record")
+from flexible_forms.utils import get_record_model
+
+Record = get_record_model()
 
 if TYPE_CHECKING:  # pragma: no cover
     from flexible_forms.models import BaseRecord

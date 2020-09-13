@@ -115,7 +115,7 @@ repos:
     hooks:
       - id: mypy
         # We'll need to install our dependencies so that mypy can follow imports, so we use a custom entrypoint.
-        entry: sh -c "poetry install && PYTHONPATH="$PYTHONPATH:$(pwd)/tests/" mypy $@"
+        entry: sh -c "poetry install && PYTHONPATH="$PYTHONPATH:$(pwd)/tests/" mypy --show-traceback $@"
         # Ignore the Django test app.
         exclude: >
           (?x)^(

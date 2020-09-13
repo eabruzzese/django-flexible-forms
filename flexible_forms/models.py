@@ -3,7 +3,7 @@
 """Model definitions for the flexible_forms module."""
 
 import logging
-from typing import TYPE_CHECKING, Any, Mapping, Optional, Type
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Type, cast
 
 import swapper
 from django import forms
@@ -14,7 +14,8 @@ from django.forms.fields import FileField
 from django.utils.functional import cached_property
 from django.utils.text import slugify
 
-from flexible_forms.fields import FIELDS_BY_KEY
+from flexible_forms.fields import FIELD_TYPES
+from flexible_forms.utils import get_record_model
 
 try:
     from django.db.models import JSONField  # type: ignore
@@ -26,7 +27,6 @@ except ImportError:  # pragma: no cover
 if TYPE_CHECKING:  # pragma: no cover
     from flexible_forms.forms import RecordForm
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # migration stability.
 #
 FIELD_TYPE_OPTIONS = sorted(
-    ((k, v.label) for k, v in FIELDS_BY_KEY.items()),
+    ((k, v.label) for k, v in FIELD_TYPES.items()),
     key=lambda o: o[0],
 )
 
@@ -45,17 +45,17 @@ FIELD_TYPE_OPTIONS = sorted(
 class BaseForm(models.Model):
     """A model representing a single type of customizable form."""
 
-    label = models.TextField(
-        blank=True,
-        default="",
-        help_text="The human-friendly name of the form.",
-    )
-    machine_name = models.TextField(
+    name = models.TextField(
         blank=True,
         help_text=(
             "The machine-friendly name of the form. Computed automatically "
             "from the label if not specified."
         ),
+    )
+    label = models.TextField(
+        blank=True,
+        default="",
+        help_text="The human-friendly name of the form.",
     )
     description = models.TextField(blank=True, default="")
 
@@ -65,13 +65,13 @@ class BaseForm(models.Model):
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save the model.
 
-        Sets the machine_name if not specified.
+        Sets the name if not specified.
 
         Args:
             args: (Passed to super)
             kwargs: (Passed to super)
         """
-        self.machine_name = self.machine_name or slugify(self.label).replace("-", "_")
+        self.name = self.name or slugify(self.label).replace("-", "_")
 
         super().save(*args, **kwargs)
 
@@ -96,7 +96,10 @@ class BaseForm(models.Model):
         Returns:
             RecordForm: A configured RecordForm (a Django ModelForm instance).
         """
-        instance = instance or swapper.load_model("flexible_forms", "Record")(form=self)
+        # We must cast to Any here; mypy errors out otherwise.
+        Record = cast(Any, get_record_model())
+
+        instance = instance or Record(form=self)
         data = {**(data or instance.data), "form": self.pk}
         files = files or {}
         initial = {**(initial or {}), "form": self.pk}
@@ -104,7 +107,7 @@ class BaseForm(models.Model):
         # The RecordForm is imported inline to prevent a circular import.
         from flexible_forms.forms import RecordForm
 
-        class_name = self.machine_name.title().replace("_", "")
+        class_name = self.name.title().replace("_", "")
         form_class_name = f"{class_name}Form"
         all_fields = self.fields.all()  # type: ignore
         field_values = {
@@ -114,7 +117,7 @@ class BaseForm(models.Model):
         }
 
         # Generate the initial list of fields that comprise the form.
-        form_fields = {f.machine_name: f.as_form_field() for f in all_fields}
+        form_fields = {f.name: f.as_form_field() for f in all_fields}
 
         # Normalize the field values to ensure they are all cast to their
         # appropriate types (as defined by their corresponding form fields).
@@ -127,7 +130,7 @@ class BaseForm(models.Model):
         # Regenerate the form fields, this time taking the field values into
         # account in order to inform any dynamic behaviors.
         form_fields = {
-            f.machine_name: f.as_form_field(
+            f.name: f.as_form_field(
                 field_values=field_values,
             )
             for f in all_fields
@@ -169,7 +172,7 @@ class BaseField(models.Model):
         help_text="The label to be displayed for this field in the form.",
     )
 
-    machine_name = models.TextField(
+    name = models.TextField(
         blank=True,
         help_text=(
             "The machine-friendly name of the field. Computed automatically "
@@ -205,13 +208,6 @@ class BaseField(models.Model):
         help_text="The form widget to use when displaying the field.",
     )
 
-    model_field_options = JSONField(
-        blank=True,
-        default=dict,
-        help_text="Custom arguments passed to the model field constructor.",
-        encoder=DjangoJSONEncoder,
-    )
-
     form_field_options = JSONField(
         blank=True,
         default=dict,
@@ -233,23 +229,9 @@ class BaseField(models.Model):
         editable=False,
     )
 
-    ##
-    # Ephemeral attributes.
-    #
-    # While a Field instance is being rendered into a Django form field, it may
-    # hold additional information to assist in that rendering. For example, a
-    # particular field might be "hidden" or "readonly" based on some criteria
-    # while the field is being rendered.
-    #
-    # These ephemeral attributes are declared here to assist with typing and
-    # reduce opacity into this process.
-    #
-    hidden: bool = False
-    readonly: bool = False
-
     class Meta:
         abstract = True
-        unique_together = ("form", "machine_name")
+        unique_together = ("form", "name")
         order_with_respect_to = "form"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
@@ -262,7 +244,7 @@ class BaseField(models.Model):
             args: (Passed to super)
             kwargs: (Passed to super)
         """
-        self.machine_name = self.machine_name or slugify(self.label).replace("-", "_")
+        self.name = self.name or slugify(self.label).replace("-", "_")
 
         super().save(*args, **kwargs)
 
@@ -275,11 +257,11 @@ class BaseField(models.Model):
         Returns:
             forms.Field: The configured Django form Field instance.
         """
-        return FIELDS_BY_KEY[self.field_type].as_form_field(
+        return FIELD_TYPES[self.field_type].as_form_field(
             **{
                 # Special parameters.
                 "field_modifiers": (
-                    (m.attribute_name, m.value_expression)
+                    (m.attribute, m.expression)
                     for m in self.field_modifiers.all()  # type: ignore
                 ),
                 "field_values": field_values,
@@ -300,14 +282,11 @@ class BaseField(models.Model):
         Returns:
             models.Field: The configured Django model Field instance.
         """
-        return FIELDS_BY_KEY[self.field_type].as_model_field(
-            **{
-                "null": not self.required,
-                "blank": not self.required,
-                "default": self.initial,
-                "help_text": self.help_text,
-                **self.model_field_options,
-            }
+        return FIELD_TYPES[self.field_type].as_model_field(
+            null=not self.required,
+            blank=not self.required,
+            default=self.initial,
+            help_text=self.help_text,
         )
 
 
@@ -321,8 +300,8 @@ class Field(BaseField):
 class BaseFieldModifier(models.Model):
     """A dynamic expression for customizing field rendering behavior.
 
-    A FieldModifier is essentially a map of `attribute_name` -> `expression`,
-    where `attribute_name` is the name of a supported attribute on the
+    A FieldModifier is essentially a map of `attribute` -> `expression`,
+    where `attribute` is the name of a supported attribute on the
     `Field` model, and `expression` is a valid Python expression.
 
     When `Field.as_form_field()` or `Field.as_model_field()` is called, the
@@ -337,7 +316,7 @@ class BaseFieldModifier(models.Model):
     >>> unmodified = field.as_form_field()
     >>> repr(unmodified.required)
     'False'
-    >>> field.modifiers.create(attribute_name='required', expression='some_input > 1')
+    >>> field.modifiers.create(attribute='required', expression='some_input > 1')
     >>> modified = field.as_form_field({'some_input': 2})
     >>> repr(modified.required)
     'True'
@@ -350,20 +329,6 @@ class BaseFieldModifier(models.Model):
     * Hiding a field until another field changes.
     """
 
-    ATTRIBUTE_HIDDEN = "hidden"
-    ATTRIBUTE_LABEL = "label"
-    ATTRIBUTE_HELP_TEXT = "help_text"
-    ATTRIBUTE_REQUIRED = "required"
-    ATTRIBUTE_INITIAL = "initial"
-
-    SUPPORTED_ATTRIBUTES = (
-        (ATTRIBUTE_HIDDEN, "Hidden"),
-        (ATTRIBUTE_LABEL, "Label"),
-        (ATTRIBUTE_HELP_TEXT, "Help text"),
-        (ATTRIBUTE_REQUIRED, "Required"),
-        (ATTRIBUTE_INITIAL, "Initial value"),
-    )
-
     field = models.ForeignKey(
         swapper.get_model_name("flexible_forms", "Field"),
         on_delete=models.CASCADE,
@@ -371,8 +336,8 @@ class BaseFieldModifier(models.Model):
         editable=False,
     )
 
-    attribute_name = models.TextField(choices=SUPPORTED_ATTRIBUTES)
-    value_expression = models.TextField()
+    attribute = models.TextField()
+    expression = models.TextField()
 
     class Meta:
         abstract = True
@@ -427,7 +392,7 @@ class BaseRecord(models.Model):
 
     @property
     def fields(self) -> Mapping[str, BaseField]:
-        return {f.machine_name: f for f in self.form.fields.all()}
+        return {f.name: f for f in self.form.fields.all()}
 
     @cached_property
     def data(self) -> Mapping[str, Any]:
@@ -439,10 +404,7 @@ class BaseRecord(models.Model):
         return {
             **{name: field.initial for name, field in self.fields.items()},
             **(
-                {
-                    a.field.machine_name: a.value
-                    for a in self.attributes.all()  # type: ignore
-                }
+                {a.field.name: a.value for a in self.attributes.all()}  # type: ignore
                 if self.pk
                 else {}
             ),
@@ -583,7 +545,7 @@ class BaseRecordAttribute(models.Model):
 # storage by creating a column of an appropriate datatype for each supported
 # field.
 #
-for field_type, field in sorted(FIELDS_BY_KEY.items(), key=lambda f: f[0]):
+for field_type, field in sorted(FIELD_TYPES.items(), key=lambda f: f[0]):
     BaseRecordAttribute.add_to_class(  # type: ignore
         BaseRecordAttribute.get_value_field_name(field_type),
         field.as_model_field(blank=True, null=True, default=None),

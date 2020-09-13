@@ -15,11 +15,17 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from hypothesis.extra.django import from_form
 from test_app.models import CustomField, CustomRecord
+from test_app.tests.factories import FieldFactory, FormFactory
 
-from flexible_forms.fields import FIELDS_BY_KEY
-from flexible_forms.models import BaseFieldModifier
+from flexible_forms.fields import (
+    FIELD_TYPES,
+    FileUploadField,
+    MultiLineTextField,
+    SingleChoiceSelectField,
+    SingleLineTextField,
+    YesNoRadioField,
+)
 from tests.conftest import ContextManagerFixture
-from tests.test_app.tests.factories import FieldFactory, FormFactory
 
 
 @pytest.mark.django_db
@@ -29,17 +35,17 @@ def test_form() -> None:
 
     # Ensure that the form has no machine name until it gets saved to the
     # database.
-    assert form.machine_name == ""
+    assert form.name == ""
 
-    # Ensure that a machine_name is generated for the form upon save.
+    # Ensure that a name is generated for the form upon save.
     form.save()
-    assert form.machine_name == "test_form"
+    assert form.name == "test_form"
 
-    # Ensure that updating the form label does not change the machine_name, which
+    # Ensure that updating the form label does not change the name, which
     # should remain stable.
     form.label = "Updated Test Form"
     form.save()
-    assert form.machine_name == "test_form"
+    assert form.name == "test_form"
 
 
 @pytest.mark.django_db
@@ -48,22 +54,22 @@ def test_field() -> None:
     field = FieldFactory.build(
         form=FormFactory(),
         label="Test Field",
-        field_type="SINGLE_LINE_TEXT",
+        field_type=SingleLineTextField.name(),
     )
 
     # Ensure that the field has no machine name until it gets saved to the
     # database.
-    assert field.machine_name == ""
+    assert field.name == ""
 
     # Ensure that a machine name is generated for the field on save.
     field.save()
-    assert field.machine_name == "test_field"
+    assert field.name == "test_field"
 
-    # Ensure that updating the field label does not change the machine_name,
+    # Ensure that updating the field label does not change the name,
     # which should remain stable.
     field.label = "Updated Test Field"
     field.save()
-    assert field.machine_name == "test_field"
+    assert field.name == "test_field"
 
     # Ensure that a Django form field instance can be produced from the field.
     assert isinstance(field.as_form_field(), forms.Field)
@@ -80,8 +86,8 @@ def test_form_lifecycle() -> None:
     name_field = FieldFactory(
         form=form,
         label="What... is your name?",
-        machine_name="name",
-        field_type="SINGLE_LINE_TEXT",
+        name="name",
+        field_type=SingleLineTextField.name(),
         required=True,
     )
 
@@ -90,13 +96,13 @@ def test_form_lifecycle() -> None:
     quest_field = FieldFactory(
         form=form,
         label="What... is your quest?",
-        machine_name="quest",
-        field_type="MULTI_LINE_TEXT",
+        name="quest",
+        field_type=MultiLineTextField.name(),
         required=True,
     )
     quest_field.field_modifiers.create(
-        attribute_name=BaseFieldModifier.ATTRIBUTE_HIDDEN,
-        value_expression="empty(name)",
+        attribute="hidden",
+        expression=f"empty({name_field.name})",
     )
 
     # Define a field that is only visible and required if the name field is not
@@ -104,8 +110,8 @@ def test_form_lifecycle() -> None:
     favorite_color_field = FieldFactory(
         form=form,
         label="What... is your favorite color?",
-        machine_name="favorite_color",
-        field_type="SINGLE_CHOICE_SELECT",
+        name="favorite_color",
+        field_type=SingleChoiceSelectField.name(),
         form_field_options={
             "choices": (
                 ("blue", "Blue"),
@@ -115,12 +121,12 @@ def test_form_lifecycle() -> None:
         required=True,
     )
     favorite_color_field.field_modifiers.create(
-        attribute_name=BaseFieldModifier.ATTRIBUTE_HIDDEN,
-        value_expression="empty(quest)",
+        attribute="hidden",
+        expression="empty(quest)",
     )
     favorite_color_field.field_modifiers.create(
-        attribute_name=BaseFieldModifier.ATTRIBUTE_HELP_TEXT,
-        value_expression="'Auuugh!' if favorite_color == 'yellow' else ''",
+        attribute="help_text",
+        expression="'Auuugh!' if favorite_color == 'yellow' else ''",
     )
 
     # Initially, the form should have three fields. Only the first field should
@@ -237,8 +243,8 @@ def test_file_upload() -> None:
     file_field = FieldFactory(
         form=form,
         label="Upload a file",
-        machine_name="file",
-        field_type="FILE_UPLOAD",
+        name="file",
+        field_type=FileUploadField.name(),
         required=False,
     )
 
@@ -250,20 +256,18 @@ def test_file_upload() -> None:
     )
 
     # Generate a Django form.
-    django_form = form.as_django_form(files={file_field.machine_name: uploaded_file})
+    django_form = form.as_django_form(files={file_field.name: uploaded_file})
 
     # The form should be valid, and saving it should produce a record.
     assert django_form.is_valid(), django_form.errors
     record = django_form.save()
-    assert isinstance(record.data[file_field.machine_name], File)
+    assert isinstance(record.data[file_field.name], File)
 
     # Setting the field to False should result in a null value when cleaned.
-    django_form = form.as_django_form(
-        files={file_field.machine_name: False}, instance=record
-    )
+    django_form = form.as_django_form(files={file_field.name: False}, instance=record)
     assert django_form.is_valid(), django_form.errors
     record = django_form.save()
-    assert record.data[file_field.machine_name]._file is None
+    assert record.data[file_field.name]._file is None
 
 
 @pytest.mark.django_db
@@ -276,13 +280,13 @@ def test_invalid_modifier_attribute() -> None:
     broken_field = FieldFactory(
         form=form,
         label="Is this broken?",
-        machine_name="broken",
-        field_type="YES_NO_RADIO",
+        name="broken",
+        field_type=YesNoRadioField.name(),
         required=True,
     )
     broken_field.field_modifiers.create(
-        attribute_name="does_not_exist",
-        value_expression="empty(broken)",
+        attribute="does_not_exist",
+        expression="empty(broken)",
     )
 
     # An error should be thrown because does_not_exist is not an attribute of a
@@ -312,16 +316,16 @@ def test_record(
     CustomField.objects.bulk_create(
         FieldFactory.build(
             form=form,
-            machine_name=f"{field_type}_field",
+            name=f"{field_type}_field",
             field_type=field_type,
             required=True,
             _order=1,
         )
-        for field_type in FIELDS_BY_KEY.keys()
+        for field_type in FIELD_TYPES.keys()
     )
 
     fields: Sequence[CustomField] = ()
-    for field_type in FIELDS_BY_KEY.keys():
+    for field_type in FIELD_TYPES.keys():
         field = FieldFactory.build(
             form=form,
             field_type=field_type,

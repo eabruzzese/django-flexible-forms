@@ -29,13 +29,6 @@ class FlexibleField:
     """
 
     ##
-    # key
-    #
-    # The machine-friendly key of the field type, e.g. "SINGLE_LINE_TEXT".
-    #
-    key: str = ""
-
-    ##
     # label
     #
     # The human-friendly key of the field type, e.g. "Single-line Text".
@@ -97,6 +90,17 @@ class FlexibleField:
     # Default: {}
     #
     model_field_options: Dict[str, Any] = {}
+
+    @classmethod
+    def name(cls) -> str:
+        """Return the string representation of the field type.
+
+        Useful for creating a type lookup, or for storing in the database.
+
+        Returns:
+            str: The string representation of the field type.
+        """
+        return cls.__name__
 
     @classmethod
     def as_form_field(
@@ -263,7 +267,6 @@ class FlexibleField:
 class SingleLineTextField(FlexibleField):
     """A field for collecting single-line text values."""
 
-    key = "SINGLE_LINE_TEXT"
     label = "Single-line Text"
 
     form_field_class = form_fields.CharField
@@ -273,7 +276,6 @@ class SingleLineTextField(FlexibleField):
 class MultiLineTextField(FlexibleField):
     """A field for collecting multiline text values."""
 
-    key = "MULTI_LINE_TEXT"
     label = "Multi-line Text"
 
     form_field_class = form_fields.CharField
@@ -284,7 +286,6 @@ class MultiLineTextField(FlexibleField):
 class EmailField(FlexibleField):
     """A field for collecting email addresses."""
 
-    key = "EMAIL"
     label = "Email Address"
 
     form_field_class = form_fields.EmailField
@@ -294,7 +295,6 @@ class EmailField(FlexibleField):
 class URLField(FlexibleField):
     """A field for collecting URL values."""
 
-    key = "URL"
     label = "URL"
 
     form_field_class = form_fields.URLField
@@ -308,7 +308,6 @@ class SensitiveTextField(FlexibleField):
     Primarily useful for obfuscating the input when on-screen.
     """
 
-    key = "SENSITIVE"
     label = "Sensitive text"
 
     form_field_class = form_fields.CharField
@@ -319,7 +318,6 @@ class SensitiveTextField(FlexibleField):
 class IntegerField(FlexibleField):
     """A field for collecting integer values."""
 
-    key = "INTEGER"
     label = "Integer"
 
     form_field_class = form_fields.IntegerField
@@ -330,7 +328,6 @@ class IntegerField(FlexibleField):
 class PositiveIntegerField(FlexibleField):
     """A field for collecting positive integer values."""
 
-    key = "POSITIVE_INTEGER"
     label = "Positive Integer"
 
     form_field_class = form_fields.IntegerField
@@ -341,7 +338,6 @@ class PositiveIntegerField(FlexibleField):
 class DecimalField(FlexibleField):
     """A field for collecting decimal number values."""
 
-    key = "DECIMAL"
     label = "Decimal Number"
 
     form_field_class = form_fields.DecimalField
@@ -353,7 +349,6 @@ class DecimalField(FlexibleField):
 class DateField(FlexibleField):
     """A field for collecting date data."""
 
-    key = "DATE"
     label = "Date"
 
     form_field_class = form_fields.DateField
@@ -363,7 +358,6 @@ class DateField(FlexibleField):
 class TimeField(FlexibleField):
     """A field for collecting time data."""
 
-    key = "TIME"
     label = "Time"
 
     form_field_class = form_fields.TimeField
@@ -373,7 +367,6 @@ class TimeField(FlexibleField):
 class DateTimeField(FlexibleField):
     """A field for collecting datetime data."""
 
-    key = "DATETIME"
     label = "Date & Time"
 
     form_field_class = form_fields.DateTimeField
@@ -383,7 +376,6 @@ class DateTimeField(FlexibleField):
 class DurationField(FlexibleField):
     """A field for collecting duration data."""
 
-    key = "DURATION"
     label = "Duration"
 
     form_field_class = form_fields.DurationField
@@ -393,7 +385,6 @@ class DurationField(FlexibleField):
 class CheckboxField(FlexibleField):
     """A field for collecting a boolean value with a checkbox."""
 
-    key = "CHECKBOX"
     label = "Checkbox"
 
     form_field_class = form_fields.BooleanField
@@ -405,7 +396,6 @@ class YesNoRadioField(FlexibleField):
     """A field for collecting a boolean value with a yes/no radio button
     set."""
 
-    key = "YES_NO_RADIO"
     label = "Yes/No Radio Buttons"
 
     form_field_class = form_fields.TypedChoiceField
@@ -424,7 +414,6 @@ class YesNoUnknownRadioField(FlexibleField):
     """A field for collecting a null-boolean value with a yes/no/unknown radio
     button set."""
 
-    key = "YES_NO_UNKNOWN_RADIO"
     label = "Yes/No/Unknown Radio Buttons"
 
     form_field_class = form_fields.TypedChoiceField
@@ -446,7 +435,6 @@ class YesNoUnknownRadioField(FlexibleField):
 class YesNoSelectField(FlexibleField):
     """A field for collecting a boolean value with a yes/no select field."""
 
-    key = "YES_NO_SELECT"
     label = "Yes/No Dropdown"
 
     form_field_class = form_fields.TypedChoiceField
@@ -464,7 +452,6 @@ class YesNoSelectField(FlexibleField):
 class YesNoUnknownSelectField(FlexibleField):
     """A field for collecting a boolean value with a yes/no select field."""
 
-    key = "YES_NO_UNKNOWN_SELECT"
     label = "Yes/No/Unknown Dropdown"
 
     form_field_class = form_fields.TypedChoiceField
@@ -485,7 +472,6 @@ class YesNoUnknownSelectField(FlexibleField):
 class SingleChoiceSelectField(FlexibleField):
     """A field for collecting a single text value from a select list."""
 
-    key = "SINGLE_CHOICE_SELECT"
     label = "Single-choice Dropdown"
 
     form_field_class = form_fields.ChoiceField
@@ -496,7 +482,6 @@ class SingleChoiceSelectField(FlexibleField):
 class SingleChoiceRadioSelectField(FlexibleField):
     """A field for collecting a text value from a set of radio buttons."""
 
-    key = "SINGLE_CHOICE_RADIO_SELECT"
     label = "Radio Buttons"
 
     form_field_class = form_fields.ChoiceField
@@ -508,7 +493,6 @@ class SingleChoiceRadioSelectField(FlexibleField):
 class MultipleChoiceSelectField(FlexibleField):
     """A field for collecting multiple text values from a select list."""
 
-    key = "MULTIPLE_CHOICE_SELECT"
     label = "Multiple-choice Dropdown"
 
     form_field_class = form_fields.MultipleChoiceField
@@ -519,7 +503,6 @@ class MultipleChoiceSelectField(FlexibleField):
 class MultipleChoiceCheckboxField(FlexibleField):
     """A field for collecting multiple text values from a checkbox list."""
 
-    key = "MULTIPLE_CHOICE_CHECKBOX"
     label = "Multiple-choice Checkboxes"
 
     form_field_class = form_fields.MultipleChoiceField
@@ -531,7 +514,6 @@ class MultipleChoiceCheckboxField(FlexibleField):
 class FileUploadField(FlexibleField):
     """A field for collecting file uploads."""
 
-    key = "FILE_UPLOAD"
     label = "File Upload"
 
     form_field_class = form_fields.FileField
@@ -541,7 +523,6 @@ class FileUploadField(FlexibleField):
 class ImageUploadField(FlexibleField):
     """A field for collecting image uploads."""
 
-    key = "IMAGE_UPLOAD"
     label = "Image Upload"
 
     form_field_class = form_fields.ImageField
@@ -549,13 +530,14 @@ class ImageUploadField(FlexibleField):
 
 
 ##
-# FIELDS_BY_KEY
+# FIELD_TYPES
 #
-# A dict mapping of field types, where the key is the `key` attribute of the
-# `FlexibleField` class, and the value is the `FlexibleField` class itself.
+# A dict mapping of field types, where the key is the string representation of
+# the field type (usually its class name), and the value is the `FlexibleField`
+# class itself.
 #
 # Built dynamically to include all descendants of `FlexibleField`.
 #
-FIELDS_BY_KEY: Dict[str, Type[FlexibleField]] = {
-    f.key: f for f in all_subclasses(FlexibleField)
+FIELD_TYPES: Dict[str, Type[FlexibleField]] = {
+    f.name(): f for f in all_subclasses(FlexibleField)
 }

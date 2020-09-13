@@ -5,7 +5,6 @@
 import logging
 from typing import TYPE_CHECKING, Any, Optional, Type, cast
 
-import swapper
 from django import forms
 from django.conf import settings
 from django.contrib import admin
@@ -31,11 +30,18 @@ else:  # pragma: no cover
     StackedInline = admin.StackedInline
     TabularInline = admin.TabularInline
 
-    # Load our swappable models.
-Field = swapper.load_model("flexible_forms", "Field")
-FieldModifier = swapper.load_model("flexible_forms", "FieldModifier")
-Form = swapper.load_model("flexible_forms", "Form")
-Record = swapper.load_model("flexible_forms", "Record")
+from flexible_forms.utils import (
+    get_field_model,
+    get_field_modifier_model,
+    get_form_model,
+    get_record_model,
+)
+
+# Load our swappable models.
+Field = get_field_model()
+FieldModifier = get_field_modifier_model()
+Form = get_form_model()
+Record = get_record_model()
 
 if TYPE_CHECKING:  # pragma: no cover
     from flexible_forms.models import BaseForm, BaseRecord
