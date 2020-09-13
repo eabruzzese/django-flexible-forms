@@ -26,7 +26,7 @@ if "nested_admin" in settings.INSTALLED_APPS:
     from nested_admin.nested import NestedModelAdmin as ModelAdmin
     from nested_admin.nested import NestedStackedInline as StackedInline
     from nested_admin.nested import NestedTabularInline as TabularInline
-else:
+else:  # pragma: no cover
     ModelAdmin = admin.ModelAdmin
     StackedInline = admin.StackedInline
     TabularInline = admin.TabularInline
@@ -37,7 +37,7 @@ FieldModifier = swapper.load_model("flexible_forms", "FieldModifier")
 Form = swapper.load_model("flexible_forms", "Form")
 Record = swapper.load_model("flexible_forms", "Record")
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from flexible_forms.models import BaseForm, BaseRecord
 
 
@@ -194,7 +194,8 @@ class RecordsAdmin(admin.ModelAdmin):
         return (
             super()
             .get_queryset(*args, **kwargs)
-            .prefetch_related("attributes", "form__fields")
+            .select_related("form")
+            .prefetch_related("form__fields__field_modifiers", "attributes__field")
         )
 
     def get_form(
@@ -220,7 +221,7 @@ class RecordsAdmin(admin.ModelAdmin):
         if obj:
             return (
                 cast(
-                    BaseForm,
+                    "BaseForm",
                     obj.form,
                 )
                 .as_django_form(

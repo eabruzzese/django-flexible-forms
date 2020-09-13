@@ -20,9 +20,7 @@ repos:
       - id: debug-statements
       - id: detect-private-key
       - id: end-of-file-fixer
-        require_serial: True
       - id: fix-encoding-pragma
-        require_serial: True
       - id: forbid-new-submodules
       - id: name-tests-test
         args: ["--django"]
@@ -37,7 +35,6 @@ repos:
       - id: no-commit-to-branch
         args: ["--branch", "master"]
       - id: trailing-whitespace
-        require_serial: True
 
   ##
   # autoflake
@@ -61,7 +58,6 @@ repos:
         types: [python]
         additional_dependencies:
           - autoflake
-        require_serial: True
 
   ##
   # isort
@@ -75,15 +71,18 @@ repos:
     hooks:
       - id: seed-isort-config
         args: ["--settings-path", "services/api/"]
-        require_serial: True
-
   - repo: https://github.com/timothycrosley/isort
     rev: 5.5.2
     hooks:
       - id: isort
         args: ["--multi-line=3", "--trailing-comma"]
-        require_serial: True
 
+  ##
+  # black
+  #
+  # Format Python code. Uses a highly-opinionated, deterministic formatter to
+  # eliminate bikeshedding discussions about code style.
+  #
   - repo: https://github.com/psf/black
     rev: 20.8b1
     hooks:
@@ -99,7 +98,12 @@ repos:
     rev: v1.3.1
     hooks:
       - id: docformatter-venv
-        require_serial: True
+        args: [--in-place]
+
+  - repo: https://github.com/pycqa/pydocstyle
+    rev: 5.1.1
+    hooks:
+      - id: pydocstyle
 
   ##
   # mypy
@@ -112,7 +116,6 @@ repos:
       - id: mypy
         # We'll need to install our dependencies so that mypy can follow imports, so we use a custom entrypoint.
         entry: sh -c "poetry install && PYTHONPATH="$PYTHONPATH:$(pwd)/tests/" mypy $@"
-        require_serial: True
         # Ignore the Django test app.
         exclude: >
           (?x)^(

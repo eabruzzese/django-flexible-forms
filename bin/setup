@@ -1,0 +1,28 @@
+#!/usr/bin/env sh
+
+set -eu
+[ "${DEBUG:-}" ] && set -x
+
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+TESTS_DIR="$PROJECT_ROOT/tests"
+
+main () {
+    (
+        # Install the required dependencies.
+        poetry install
+
+        cd "$TESTS_DIR" || exit 1
+
+        # Delete and recreate the test database.
+        rm -f "db.sqlite3"
+        poetry run ./manage.py migrate --run-syncdb
+
+        # Create the admin user.
+        poetry run ./manage.py shell \
+            --command "from django.contrib.auth.models import User; User.objects.create_superuser('admin', 'admin@example.com', 'admin')"
+
+        echo "Done! You can now run bin/start and log in with username 'admin', password 'admin'."
+    )
+}
+
+main "$@"

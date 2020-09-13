@@ -12,7 +12,7 @@ from django.forms import widgets as form_widgets
 
 try:
     from django.db.models import JSONField  # type: ignore
-except ImportError:
+except ImportError:  # pragma: no cover
     from django.contrib.postgres.fields import JSONField
 
 from .utils import all_subclasses, evaluate_expression
@@ -254,7 +254,7 @@ class FlexibleField:
                 given "hidden" value.
         """
         if hidden:
-            form_field.widget = form_widgets.HiddenInput
+            form_field.widget = form_widgets.HiddenInput()  # type: ignore
             form_field.required = False
 
         return form_field

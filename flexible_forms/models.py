@@ -3,13 +3,14 @@
 """Model definitions for the flexible_forms module."""
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional, Type
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Type
 
 import swapper
 from django import forms
 from django.core.files.base import File
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
+from django.forms.fields import FileField
 from django.utils.functional import cached_property
 from django.utils.text import slugify
 
@@ -17,12 +18,12 @@ from flexible_forms.fields import FIELDS_BY_KEY
 
 try:
     from django.db.models import JSONField  # type: ignore
-except ImportError:
+except ImportError:  # pragma: no cover
     from django.contrib.postgres.fields import JSONField
 
 # If we're only type checking, import things that would otherwise cause an
 # ImportError due to circular dependencies.
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from flexible_forms.forms import RecordForm
 
 
@@ -61,9 +62,6 @@ class BaseForm(models.Model):
     class Meta:
         abstract = True
 
-    def __str__(self) -> str:
-        return str(self.label)
-
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save the model.
 
@@ -82,6 +80,7 @@ class BaseForm(models.Model):
         data: Optional[Mapping[str, Any]] = None,
         files: Optional[Mapping[str, File]] = None,
         instance: Optional["BaseRecord"] = None,
+        initial: Optional[Mapping[str, Any]] = None,
         **kwargs: Any,
     ) -> "RecordForm":
         """Return the form represented as a Django form instance.
@@ -97,9 +96,10 @@ class BaseForm(models.Model):
         Returns:
             RecordForm: A configured RecordForm (a Django ModelForm instance).
         """
-        data = data or {}
+        instance = instance or swapper.load_model("flexible_forms", "Record")(form=self)
+        data = {**(data or instance.data), "form": self.pk}
         files = files or {}
-        instance_data = instance.data if instance else {}
+        initial = {**(initial or {}), "form": self.pk}
 
         # The RecordForm is imported inline to prevent a circular import.
         from flexible_forms.forms import RecordForm
@@ -108,7 +108,7 @@ class BaseForm(models.Model):
         form_class_name = f"{class_name}Form"
         all_fields = self.fields.all()  # type: ignore
         field_values = {
-            **instance_data,
+            **instance.data,
             **({k: data.get(k) for k in data.keys()}),
             **({k: files.get(k) for k in files.keys()}),
         }
@@ -120,6 +120,8 @@ class BaseForm(models.Model):
         # appropriate types (as defined by their corresponding form fields).
         for field_name, form_field in form_fields.items():
             field_value = field_values.get(field_name)
+            if isinstance(form_field, FileField) and field_value is False:
+                field_value = None
             field_values[field_name] = form_field.to_python(field_value)
 
         # Regenerate the form fields, this time taking the field values into
@@ -142,7 +144,9 @@ class BaseForm(models.Model):
         )
 
         # Create a form instance from the form class and the passed parameters.
-        form_instance = form_class(data=data, files=files, instance=instance, **kwargs)
+        form_instance = form_class(
+            data=data, files=files, instance=instance, initial=initial, **kwargs
+        )
 
         return form_instance
 
@@ -247,9 +251,6 @@ class BaseField(models.Model):
         abstract = True
         unique_together = ("form", "machine_name")
         order_with_respect_to = "form"
-
-    def __str__(self) -> str:
-        return f"Field `{self.label}` (type {self.field_type}, form ID {self.form_id})"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save the model.
@@ -424,28 +425,27 @@ class BaseRecord(models.Model):
     class Meta:
         abstract = True
 
-    def __str__(self) -> str:
-        if not self.form_id or not self.pk:
-            return "Unsaved Record"
-        return f"{self.form} {self.pk}"
-
     @property
     def fields(self) -> Mapping[str, BaseField]:
         return {f.machine_name: f for f in self.form.fields.all()}
 
     @cached_property
-    def data(self) -> Dict[str, Any]:
+    def data(self) -> Mapping[str, Any]:
         """Return a dict of Record attributes and their values.
 
         Returns:
-            Dict[str, Any]: A dict of Record attributes and their values.
+            Mapping[str, Any]: A dict of Record attributes and their values.
         """
         return {
             **{name: field.initial for name, field in self.fields.items()},
-            **{
-                a.field.machine_name: a.value
-                for a in self.attributes.all()  # type: ignore
-            },
+            **(
+                {
+                    a.field.machine_name: a.value
+                    for a in self.attributes.all()  # type: ignore
+                }
+                if self.pk
+                else {}
+            ),
         }
 
     def set_attribute(self, field_name: str, value: Any) -> None:

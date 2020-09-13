@@ -40,7 +40,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "nested_admin",
     "flexible_forms",
-    "test_app",
+    "tests.test_app.apps.TestAppConfig",
 ]
 
 MIDDLEWARE = [

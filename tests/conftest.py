@@ -56,8 +56,7 @@ def rollback() -> ContextManagerFixture:
 
     @contextmanager
     def _rollback() -> Iterator:
-        """Execute a block of code and automatically roll back any database
-        changes."""
+        """Automatically roll back any database changes made while yielding."""
         sid = transaction.savepoint()
         try:
             yield

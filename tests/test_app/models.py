@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+"""Model definitions for the test app."""
+
 import uuid
 
 from django.db import models

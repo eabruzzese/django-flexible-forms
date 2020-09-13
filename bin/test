@@ -1,0 +1,19 @@
+#!/usr/bin/env sh
+
+set -eu
+[ "${DEBUG:-}" ] && set -x
+
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+BIN_DIR="$PROJECT_ROOT/bin"
+TESTS_DIR="$PROJECT_ROOT/tests"
+
+main () {
+    (
+        cd "$TESTS_DIR" || exit 1
+
+        # Run the pytest suite.
+        poetry run pytest "$@"
+    )
+}
+
+main "$@"

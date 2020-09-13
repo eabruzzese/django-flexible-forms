@@ -12,7 +12,7 @@ from django.forms.fields import FileField
 
 Record = swapper.load_model("flexible_forms", "Record")
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from flexible_forms.models import BaseRecord
 
 
@@ -33,12 +33,13 @@ class RecordForm(forms.ModelForm):
         files: Optional[Mapping[str, File]] = None,
         instance: Optional["BaseRecord"] = None,
         initial: Optional[Mapping[str, Any]] = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> None:
         initial_data = {
             **(instance.data if instance else {}),
             **(initial or {}),
         }
+
         super().__init__(
             data=data, files=files, instance=instance, initial=initial_data, **kwargs
         )
@@ -84,15 +85,20 @@ class RecordForm(forms.ModelForm):
             return record
 
         # Update any changed attributes.
-        for field_name in self.changed_data:
-            cleaned_value = self.cleaned_data[field_name]
-
-            if field_name in self.Meta.fields:
-                setattr(record, field_name, cleaned_value)
-            else:
-                record.set_attribute(field_name, cleaned_value)
-
         if commit:
-            record.save()
+            for field_name in self.changed_data:
+                cleaned_value = self.cleaned_data[field_name]
+
+                if field_name in self.Meta.fields:
+                    setattr(record, field_name, cleaned_value)
+                else:
+                    record.set_attribute(field_name, cleaned_value)
+
+                record.save()
+        else:
+            record_data = self.cleaned_data.copy()
+            del record_data["form"]
+            record._invalidate_cache()
+            record.data = self.cleaned_data
 
         return record
