@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, Mapping, Optional, Type, cast
 import swapper
 from django import forms
 from django.core.exceptions import ValidationError
-from django.core.files.base import File
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.forms.fields import FileField
@@ -85,7 +84,7 @@ class BaseForm(models.Model):
     def as_django_form(
         self,
         data: Optional[Mapping[str, Any]] = None,
-        files: Optional[Mapping[str, File]] = None,
+        files: Optional[Mapping[str, Any]] = None,
         instance: Optional["BaseRecord"] = None,
         initial: Optional[Mapping[str, Any]] = None,
         **kwargs: Any,
@@ -106,7 +105,6 @@ class BaseForm(models.Model):
         Returns:
             RecordForm: A configured RecordForm (a Django ModelForm instance).
         """
-
         if isinstance(data, MultiValueDict):
             data = data.dict()
 
@@ -121,7 +119,7 @@ class BaseForm(models.Model):
 
         instance = instance or Record(form=self)
         data = {**(data or instance.data), "form": self.pk}
-        files = files or {}
+        files = cast(Mapping[str, Any], files or {})
         initial = {**(initial or {}), "form": self.pk}
 
         # The RecordForm is imported inline to prevent a circular import.
@@ -471,9 +469,9 @@ class BaseRecord(models.Model):
     class Meta:
         abstract = True
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self._staged_changes = {}
+        self._staged_changes: Mapping[str, Any] = {}
 
     @property
     def fields(self) -> Mapping[str, BaseField]:
@@ -499,7 +497,7 @@ class BaseRecord(models.Model):
                 if self.pk
                 else {}
             ),
-            **self._staged_changes
+            **self._staged_changes,
         }
 
     def set_attribute(self, field_name: str, value: Any, commit: bool = False) -> None:
@@ -508,6 +506,7 @@ class BaseRecord(models.Model):
         Args:
             field_name: The name of the attribute to set.
             value: The value.
+            commit: True if the record should be persisted.
         """
         RecordAttribute = swapper.load_model(
             "flexible_forms",
@@ -522,7 +521,12 @@ class BaseRecord(models.Model):
                 },
             )
         else:
-            self._staged_changes = {**self._staged_changes, field_name: RecordAttribute(field=self.fields[field_name], value=value).value}
+            self._staged_changes = {
+                **self._staged_changes,
+                field_name: RecordAttribute(
+                    field=self.fields[field_name], value=value
+                ).value,
+            }
 
         self._invalidate_cache()
 

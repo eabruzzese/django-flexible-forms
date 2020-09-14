@@ -349,13 +349,13 @@ def test_initial_values() -> None:
         name="test_field",
         field_type=IntegerField.name(),
         required=True,
-        initial=0
+        initial=0,
     )
     django_form = form.as_django_form()
-    assert django_form.initial['test_field'] == '0'
+    assert django_form.initial["test_field"] == "0"
 
     django_form = form.as_django_form(initial=MultiValueDict({field.name: [123]}))
-    assert django_form.initial['test_field'] == 123
+    assert django_form.initial["test_field"] == 123
 
 
 @pytest.mark.django_db
