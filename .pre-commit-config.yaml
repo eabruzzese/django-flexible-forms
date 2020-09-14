@@ -104,6 +104,21 @@ repos:
     rev: 5.1.1
     hooks:
       - id: pydocstyle
+        # Ignore the Django test app.
+        exclude: >
+          (?x)^(
+            tests/.*
+          )
+
+  - repo: https://github.com/terrencepreilly/darglint
+    rev: v1.5.4
+    hooks:
+      - id: darglint
+        # Ignore the Django test app.
+        exclude: >
+          (?x)^(
+            tests/.*
+          )
 
   ##
   # mypy
