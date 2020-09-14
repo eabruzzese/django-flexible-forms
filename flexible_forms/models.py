@@ -86,12 +86,15 @@ class BaseForm(models.Model):
         """Return the form represented as a Django form instance.
 
         Args:
-            data (Optional[Mapping[str, Any]]): Data to be passed to the
+            data: Data to be passed to the
                 Django form constructor.
-            files (Optional[Mapping[str, File]]): Data to be passed to the
+            files: Data to be passed to the
                 Django form constructor.
-            instance (Optional[BaseRecord]): The Record instance to be passed to
+            instance: The Record instance to be passed to
                 the Django form constructor.
+            initial: Initial values for the
+                form fields.
+            **kwargs: Passed to the Django ModelForm constructor.
 
         Returns:
             RecordForm: A configured RecordForm (a Django ModelForm instance).
@@ -254,6 +257,10 @@ class BaseField(models.Model):
     ) -> forms.Field:
         """Return a Django form Field definition.
 
+        Args:
+            field_values: The current values of
+                all fields in the form.
+
         Returns:
             forms.Field: The configured Django form Field instance.
         """
@@ -414,8 +421,8 @@ class BaseRecord(models.Model):
         """Set an attribute of the record to the given value.
 
         Args:
-            field_name (str): The name of the attribute to set.
-            value (Any): The value.
+            field_name: The name of the attribute to set.
+            value: The value.
         """
         if not self.pk:
             self.save()
@@ -483,7 +490,7 @@ class BaseRecordAttribute(models.Model):
         """Return the name of the field used for storing field_type values.
 
         Args:
-            field_type (str): The field type.
+            field_type: The field type.
 
         Returns:
             str: The name of the model field for storing field_type values.
@@ -516,7 +523,7 @@ class BaseRecordAttribute(models.Model):
         Sets the value of the attribute to the given value.
 
         Args:
-            new_value (Any): The new value for the attribute.
+            new_value: The new value for the attribute.
         """
         # Clear out the
         value_field_names = (

@@ -115,14 +115,14 @@ class FlexibleField:
         Receives a dict of kwargs to pass through to the form field constructor.
 
         Args:
-            field_modifiers (Sequence[Tuple[str, str]]): A sequence of modifiers to
+            field_modifiers: A sequence of modifiers to
                 be applied to the field.
-            field_values (Optional[Mapping[str, Any]]): A mapping of the
+            field_values: A mapping of the
                 current form values.
-            form_widget_options (Optional[Mapping[str, Any]]): A mapping of
+            form_widget_options: A mapping of
                 options to pass to the widget constructor if a widget is
                 configured.
-            kwargs (Any): A dict of kwargs to be passed to the constructor of the
+            kwargs: A dict of kwargs to be passed to the constructor of the
                 `form_field_class`.
 
         Returns:
@@ -166,7 +166,7 @@ class FlexibleField:
         Receives a dict of kwargs to pass through to the model field constructor.
 
         Args:
-            kwargs (Any): A dict of kwargs to be passed to the constructor of the
+            kwargs: A dict of kwargs to be passed to the constructor of the
                 `model_field_class`.
 
         Returns:
@@ -189,10 +189,12 @@ class FlexibleField:
         """Apply the given modifiers to the given Django form field.
 
         Args:
-            form_field (form_fields.Field): The form field to be modified.
-            modifiers (Sequence[Tuple[str, str]]): A sequence of tuples in the form
-                of (attribute_name, value_expression) tuples to apply to the
+            form_field: The form field to be modified.
+            field_modifiers: A sequence of tuples
+                in the form of (attribute, expression) tuples to apply to the
                 field.
+            field_values: The current values of
+                all fields on the form.
 
         Returns:
             form_fields.Field: The given form field, modified using the modifiers.
@@ -249,9 +251,9 @@ class FlexibleField:
         set to False.
 
         Args:
-            form_field (form_fields.Field): The form field that should be hidden.
-            hidden (bool): The new value of "hidden".
-            kwargs (Any): Unused.
+            form_field: The form field that should be hidden.
+            hidden: The new value of "hidden".
+            kwargs: Unused.
 
         Returns:
             form_fields.Field: The given form_field, modified to use the

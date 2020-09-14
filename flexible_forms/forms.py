@@ -74,10 +74,10 @@ class RecordForm(forms.ModelForm):
         Maps the cleaned form data into the Record's _data field.
 
         Args:
-            commit (bool): If True, persists the data to the database.
+            commit: If True, persists the data to the database.
 
         Returns:
-            instance (BaseRecord): The Record model instance.
+            instance: The Record model instance.
         """
         record = cast("BaseRecord", super().save(commit=False))
 

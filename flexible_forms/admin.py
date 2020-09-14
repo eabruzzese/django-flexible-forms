@@ -128,7 +128,7 @@ class FormsAdmin(ModelAdmin):
         """The number of fields related to this form.
 
         Args:
-            form (Form): The form object.
+            form: The form object.
 
         Returns:
             int: The number of fields on the form.
@@ -142,10 +142,11 @@ class FormsAdmin(ModelAdmin):
         """The number of records related to this form.
 
         Args:
-            form (Form): The form object.
+            form: The form object.
 
         Returns:
-            int: The number of records related to the form.
+            SafeText: The number of records related to the form in a
+                hyperlink to the records listing with a filter for the form.
         """
         app_label = Record._meta.app_label  # noqa: WPS437
         model_name = Record._meta.model_name  # noqa: WPS437
@@ -216,8 +217,8 @@ class RecordsAdmin(admin.ModelAdmin):
         Generated dynamically if the Record has a form defined.
 
         Args:
-            request (HttpRequest): The current HTTP request.
-            obj (Optional[BaseRecord]): The record for which to render the form.
+            request: The current HTTP request.
+            obj: The record for which to render the form.
             args: (Passed to super)
             kwargs: (Passed to super)
 
@@ -254,7 +255,7 @@ class RecordsAdmin(admin.ModelAdmin):
         Uses the query parameters to create a new record of the given type.
 
         Args:
-            request (HttpRequest): The current HTTP request.
+            request: The current HTTP request.
             args: (Passed to super)
             kwargs: (Passed to super)
 
