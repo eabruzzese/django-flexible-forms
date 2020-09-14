@@ -3,12 +3,11 @@
 """Tests for form-related models."""
 
 from datetime import timedelta
-from flexible_forms.utils import FormEvaluator
 from typing import Sequence, cast
-from django.core.exceptions import ValidationError
 
 import pytest
 from django import forms
+from django.core.exceptions import ValidationError
 from django.core.files.base import File
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import models
@@ -27,6 +26,7 @@ from flexible_forms.fields import (
     SingleLineTextField,
     YesNoRadioField,
 )
+from flexible_forms.utils import FormEvaluator
 from tests.conftest import ContextManagerFixture
 
 

@@ -15,8 +15,7 @@ from typing import (
 )
 
 import swapper
-
-from simpleeval import DEFAULT_FUNCTIONS, DEFAULT_OPERATORS, SimpleEval, simple_eval
+from simpleeval import DEFAULT_FUNCTIONS, DEFAULT_OPERATORS, SimpleEval
 
 if TYPE_CHECKING:  # pragma: no cover
     from flexible_forms.models import (
@@ -79,7 +78,7 @@ def empty(value: Any) -> bool:
 
 
 class FormEvaluator(SimpleEval):
-    """An evaluator subclass for safely evaluating expressions against Django forms."""
+    """An evaluator subclass for evaluating form expressions."""
 
     OPERATORS = {
         **DEFAULT_OPERATORS.copy(),

@@ -12,11 +12,6 @@ repos:
       - id: check-xml
       - id: check-yaml
         args: ["--allow-multiple-documents"]
-        # Ignore helm chart templates, which contain Go template syntax.
-        exclude: >
-          (?x)^(
-            infrastructure/charts/.*\.yaml
-          )
       - id: debug-statements
       - id: detect-private-key
       - id: end-of-file-fixer
@@ -104,9 +99,9 @@ repos:
     rev: 5.1.1
     hooks:
       - id: pydocstyle
-        # Ignore the Django test app.
         exclude: >
           (?x)^(
+            docs/.*|
             tests/.*
           )
 
@@ -114,9 +109,9 @@ repos:
     rev: v1.5.4
     hooks:
       - id: darglint
-        # Ignore the Django test app.
         exclude: >
           (?x)^(
+            docs/.*|
             tests/.*
           )
 
@@ -131,8 +126,8 @@ repos:
       - id: mypy
         # We'll need to install our dependencies so that mypy can follow imports, so we use a custom entrypoint.
         entry: sh -c "poetry install && PYTHONPATH="$PYTHONPATH:$(pwd)/tests/" mypy --show-traceback $@"
-        # Ignore the Django test app.
         exclude: >
           (?x)^(
+            docs/.*|
             tests/.*
           )

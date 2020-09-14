@@ -14,6 +14,33 @@ Features include:
   or only require a field based on the current form state? You can configure
   those behaviors by adding `FieldModifier`s to your form fields.
 
+# Table of Contents
+
+- [django-flexible-forms](#django-flexible-forms)
+  - [Installation](#installation)
+    - [1. Install the package.](#1-install-the-package)
+    - [2. Add it to your INSTALLED_APPS in settings.py.](#2-add-it-to-your-installed_apps-in-settingspy)
+    - [3. Decide if you want to customize the models](#3-decide-if-you-want-to-customize-the-models)
+  - [Quickstart](#quickstart)
+    - [1. Define a Form in your database.](#1-define-a-form-in-your-database)
+    - [2. Get a Django form from your Form model.](#2-get-a-django-form-from-your-form-model)
+    - [3. Save the form to create a Record.](#3-save-the-form-to-create-a-record)
+    - [4. Add FieldModifiers to your Fields to make your form dynamic.](#4-add-fieldmodifiers-to-your-fields-to-make-your-form-dynamic)
+  - [Customizing the models](#customizing-the-models)
+    - [1. Extend the base model for the model you want to customize.](#1-extend-the-base-model-for-the-model-you-want-to-customize)
+    - [2. Tell django-flexible-forms that you want to use your model instead of the built-in one.](#2-tell-django-flexible-forms-that-you-want-to-use-your-model-instead-of-the-built-in-one)
+    - [3. Be sure to use the get_modelname_model() utilities when referencing your form class.](#3-be-sure-to-use-the-get_modelname_model-utilities-when-referencing-your-form-class)
+    - [models.py](#modelspy)
+    - [settings.py](#settingspy)
+  - [Field types](#field-types)
+    - [Built-in field types](#built-in-field-types)
+    - [Writing custom field types](#writing-custom-field-types)
+      - [1. Create a class that extends flexible_forms.fields.FieldType](#1-create-a-class-that-extends-flexible_formsfieldsfieldtype)
+      - [2. Migrate the database.](#2-migrate-the-database)
+      - [3. Use your new field type.](#3-use-your-new-field-type)
+  - [Setting up for development](#setting-up-for-development)
+  - [Running the test suite](#running-the-test-suite)
+
 ## Installation
 
 ### 1. Install the package.
@@ -47,9 +74,9 @@ own fields to them as needed.
 > you're going to do it: migrating a swappable model later can be painful and
 > time-consuming.
 
-To for details on model customization, see the [Customizing the models]() section.
+To for details on model customization, see the [Customizing the models](#customizing-the-models) section.
 
-## Quickstart
+## Quickstart Tutorial
 
 ### 1. Define a `Form` in your database.
 
@@ -226,7 +253,7 @@ Form = get_form_model()  # your_app.CustomForm
 Here's a few handy "kitchen sink" snippets you can use if you want to
 override all of the builtin models:
 
-### `models.py`
+### Example `models.py`
 
 ```python
 # your_app/models.py
@@ -255,7 +282,7 @@ class RecordAttribute(BaseRecordAttribute):
     """A custom implementation of flexible_forms.RecordAttribute."""
 ```
 
-### `settings.py`
+### Example `settings.py`
 
 ```python
 # your_app/settings.py
@@ -321,7 +348,7 @@ Common reasons to implement your own field type include:
 Luckily, creating a custom field type is easy, and most use cases only
 require a few lines of code.
 
-### 1. Create a class that extends `flexible_forms.fields.FieldType`
+#### 1. Create a class that extends `flexible_forms.fields.FieldType`
 
 Field types are mostly configuration. Just create a new class that extends `flexible_forms.forms.FieldType` and set your options:
 
@@ -376,7 +403,7 @@ class StaffUserEmailDropdownField(FieldType):
     model_field_class = models.EmailField
 ```
 
-### 2. Migrate the database.
+#### 2. Migrate the database.
 
 Once you've defined your new field type, `django-flexible-forms` will find it
 automatically (it finds all of the subclasses of `FieldType`). Just migrate
@@ -384,7 +411,7 @@ the database to get it added to the list of supported field types, and use it
 like you would any other field. Adding a new field type does not alter any
 data; it's just updating metadata for the model.
 
-### 3. Use your new field type.
+#### 3. Use your new field type.
 
 Now when you're building your forms, you can use the class name of your field
 type for `Field.field_type`. For example:

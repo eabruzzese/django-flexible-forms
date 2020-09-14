@@ -4,25 +4,24 @@
 
 import logging
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Type, cast
-from django.core.exceptions import ValidationError
-from simpleeval import (
-    AttributeDoesNotExist,
-    FunctionNotDefined,
-    InvalidExpression,
-    NameNotDefined,
-)
 
 import swapper
 from django import forms
+from django.core.exceptions import ValidationError
 from django.core.files.base import File
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.forms.fields import FileField
 from django.utils.functional import cached_property
 from django.utils.text import slugify
+from simpleeval import FunctionNotDefined, NameNotDefined
 
 from flexible_forms.fields import FIELD_TYPES
-from flexible_forms.utils import FormEvaluator, evaluate_expression, get_record_model
+from flexible_forms.utils import (
+    FormEvaluator,
+    evaluate_expression,
+    get_record_model,
+)
 
 try:
     from django.db.models import JSONField  # type: ignore
@@ -356,8 +355,8 @@ class BaseFieldModifier(models.Model):
     def clean(self) -> None:
         """Ensure that the expression is valid for the form.
 
-        Checks to make sure that referenced names and functions are defined
-        before saving.
+        Checks to make sure that referenced names and functions are
+        defined before saving.
         """
         super().clean()
 
@@ -463,6 +462,12 @@ class BaseRecord(models.Model):
 
     @property
     def fields(self) -> Mapping[str, BaseField]:
+        """Return a map of Fields for the Record's form, keyed by their names.
+
+        Returns:
+            Mapping[str, BaseField]: A mapping of Field instances by their
+                names.
+        """
         return {f.name: f for f in self.form.fields.all()}
 
     @cached_property

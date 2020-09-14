@@ -199,12 +199,6 @@ class FlexibleField:
         Returns:
             form_fields.Field: The given form field, modified using the modifiers.
         """
-        # Create a "_modifiers" dict on the field where the resuts of all
-        # modifier expressions will be stored. This is helpful for debugging
-        # and for modifiers that have no backend side-effects (i.e., the value
-        # of the modifier is only used in something like a frontend app).
-        setattr(form_field, "_modifiers", getattr(form_field, "_modifiers", {}))
-
         for attribute, expression in field_modifiers:
             # Evaluate the expression and set the attribute specified by
             # `self.attribute` to the value it returns.
@@ -231,9 +225,16 @@ class FlexibleField:
             elif hasattr(form_field, attribute):
                 setattr(form_field, attribute, expression_value)
 
-            # Finally, add the modifier and its value to the "modifiers" dict
-            # on the field.
-            form_field._modifiers[attribute] = expression_value
+            # Finally, add the modifier and its value to the applied modifiers
+            # dict on the field.
+            setattr(
+                form_field,
+                "_modifiers",
+                {
+                    **getattr(form_field, "_applied_modifiers", {}),
+                    attribute: expression_value,
+                },
+            )
 
         return form_field
 
@@ -392,8 +393,7 @@ class CheckboxField(FlexibleField):
 
 
 class YesNoRadioField(FlexibleField):
-    """A field for collecting a boolean value with a yes/no radio button
-    set."""
+    """A field for collecting a yes/no value with radio buttons."""
 
     label = "Yes/No Radio Buttons"
 
@@ -410,8 +410,7 @@ class YesNoRadioField(FlexibleField):
 
 
 class YesNoUnknownRadioField(FlexibleField):
-    """A field for collecting a null-boolean value with a yes/no/unknown radio
-    button set."""
+    """A field for collecting a yes/no/unknown value with radio buttons."""
 
     label = "Yes/No/Unknown Radio Buttons"
 
