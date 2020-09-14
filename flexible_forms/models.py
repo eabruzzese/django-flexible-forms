@@ -12,6 +12,7 @@ from django.core.files.base import File
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.forms.fields import FileField
+from django.utils.datastructures import MultiValueDict
 from django.utils.functional import cached_property
 from django.utils.text import slugify
 from simpleeval import FunctionNotDefined, NameNotDefined
@@ -105,6 +106,16 @@ class BaseForm(models.Model):
         Returns:
             RecordForm: A configured RecordForm (a Django ModelForm instance).
         """
+
+        if isinstance(data, MultiValueDict):
+            data = data.dict()
+
+        if isinstance(files, MultiValueDict):
+            files = files.dict()
+
+        if isinstance(initial, MultiValueDict):
+            initial = initial.dict()
+
         # We must cast to Any here; mypy errors out otherwise.
         Record = cast(Any, get_record_model())
 
@@ -460,6 +471,10 @@ class BaseRecord(models.Model):
     class Meta:
         abstract = True
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._staged_changes = {}
+
     @property
     def fields(self) -> Mapping[str, BaseField]:
         """Return a map of Fields for the Record's form, keyed by their names.
@@ -484,29 +499,30 @@ class BaseRecord(models.Model):
                 if self.pk
                 else {}
             ),
+            **self._staged_changes
         }
 
-    def set_attribute(self, field_name: str, value: Any) -> None:
+    def set_attribute(self, field_name: str, value: Any, commit: bool = False) -> None:
         """Set an attribute of the record to the given value.
 
         Args:
             field_name: The name of the attribute to set.
             value: The value.
         """
-        if not self.pk:
-            self.save()
-
         RecordAttribute = swapper.load_model(
             "flexible_forms",
             "RecordAttribute",
         )
-        RecordAttribute.objects.update_or_create(
-            record=self,
-            field=self.fields[field_name],
-            defaults={
-                "value": value,
-            },
-        )
+        if commit:
+            RecordAttribute.objects.update_or_create(
+                record=self,
+                field=self.fields[field_name],
+                defaults={
+                    "value": value,
+                },
+            )
+        else:
+            self._staged_changes = {**self._staged_changes, field_name: RecordAttribute(field=self.fields[field_name], value=value).value}
 
         self._invalidate_cache()
 
@@ -520,6 +536,8 @@ class BaseRecord(models.Model):
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save the record and invalidate the property caches."""
         super().save(*args, **kwargs)
+        for field_name, value in self._staged_changes.items():
+            self.set_attribute(field_name, value, commit=True)
         self._invalidate_cache()
 
 

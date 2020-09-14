@@ -12,6 +12,7 @@ from django.core.files.base import File
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import models
 from django.forms.widgets import HiddenInput, Select, Textarea, TextInput
+from django.utils.datastructures import MultiValueDict
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from hypothesis.extra.django import from_form
@@ -21,6 +22,7 @@ from test_app.tests.factories import FieldFactory, FormFactory
 from flexible_forms.fields import (
     FIELD_TYPES,
     FileUploadField,
+    IntegerField,
     MultiLineTextField,
     SingleChoiceSelectField,
     SingleLineTextField,
@@ -336,12 +338,33 @@ def test_file_upload() -> None:
 
 
 @pytest.mark.django_db
+def test_initial_values() -> None:
+    """Ensure initial values are respected for django forms."""
+    form = FormFactory(label="Initial Value Form")
+
+    # Define a field that has a modifier that tries to change a nonexistent attribute.
+    field = FieldFactory(
+        form=form,
+        label="How many?",
+        name="test_field",
+        field_type=IntegerField.name(),
+        required=True,
+        initial=0
+    )
+    django_form = form.as_django_form()
+    assert django_form.initial['test_field'] == '0'
+
+    django_form = form.as_django_form(initial=MultiValueDict({field.name: [123]}))
+    assert django_form.initial['test_field'] == 123
+
+
+@pytest.mark.django_db
 def test_noop_modifier_attribute() -> None:
     """Ensure that a nonexistent attribute in a modifier is a noop.
 
     Field modifiers can be
     """
-    form = FormFactory(label="Broken Field Modifier")
+    form = FormFactory(label="Orphan Field Modifier")
 
     # Define a field that has a modifier that tries to change a nonexistent attribute.
     field = FieldFactory(
