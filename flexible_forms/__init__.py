@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-from importlib.metadata import version
+try:
+    from importlib.metadata import version
+except ImportError:
+    from importlib_metadata import version
 
 default_app_config = "flexible_forms.apps.FlexibleFormsConfig"
 
