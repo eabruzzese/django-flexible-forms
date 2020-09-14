@@ -365,7 +365,7 @@ def test_noop_modifier_attribute() -> None:
 
 @settings(deadline=None, suppress_health_check=(HealthCheck.too_slow,))
 @given(st.data())
-@pytest.mark.timeout(120)
+@pytest.mark.timeout(360)
 @pytest.mark.django_db
 def test_record(
     patch_field_strategies: ContextManagerFixture,

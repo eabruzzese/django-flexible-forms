@@ -16,6 +16,7 @@ dist/
 
 # Coverage report data.
 htmlcov
+coverage.xml
 .coverage
 
 # File uploads in the test project.

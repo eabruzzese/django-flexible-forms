@@ -1,5 +1,8 @@
 # django-flexible-forms
 
+![build](https://github.com/eabruzzese/django-flexible-forms/workflows/build/badge.svg)
+[![codecov](https://codecov.io/gh/eabruzzese/django-flexible-forms/branch/master/graph/badge.svg)](https://codecov.io/gh/eabruzzese/django-flexible-forms)
+
 The `django-flexible-forms` module allows you to define forms in your
 database and use them like regular ol' Django forms.
 

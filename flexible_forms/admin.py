@@ -115,7 +115,7 @@ class FormsAdmin(ModelAdmin):
             models.QuerySet[Form]: An optimized queryset.
         """
         return cast(
-            models.QuerySet["BaseForm"],
+            "models.QuerySet[BaseForm]",
             (
                 super()
                 .get_queryset(*args, **kwargs)
