@@ -3,7 +3,9 @@
 """Tests for form-related models."""
 
 from datetime import timedelta
+from flexible_forms.utils import FormEvaluator
 from typing import Sequence, cast
+from django.core.exceptions import ValidationError
 
 import pytest
 from django import forms
@@ -76,6 +78,69 @@ def test_field() -> None:
 
     # Ensure that a Django model field instance can be produced from the field.
     assert isinstance(field.as_model_field(), models.Field)
+
+
+@pytest.mark.django_db
+def test_field_modifier() -> None:
+    """Ensure that field modifiers can be created for a field.
+
+    Tests validation logic for expression validity.
+    """
+    form = FormFactory()
+
+    field_1 = FieldFactory(
+        form=form,
+        name="field_1",
+        label="Test Field 1",
+        field_type=SingleLineTextField.name(),
+    )
+
+    field_2 = FieldFactory(
+        form=form,
+        name="field_2",
+        label="Test Field 2",
+        field_type=SingleLineTextField.name(),
+    )
+
+    modifier = field_2.field_modifiers.create(attribute="required", expression="True")
+
+    # Valid field modifiers should pass validation.
+    modifier.clean()
+
+    # Field modifiers that reference fields that don't exist should raise a
+    # ValidationError.
+    with pytest.raises(ValidationError) as ex:
+        modifier.expression = "does_not_exist == 1"
+        modifier.clean()
+
+    # The validation message should tell the user what's wrong, and include the
+    # name of the invalid variable as well as a list of valid ones.
+    assert "no field with that name exists" in str(ex)
+    assert "does_not_exist" in str(ex)
+    assert ", ".join([field_1.name, field_2.name]) in str(ex)
+
+    # Field modifiers that reference functions that don't exist should raise a
+    # ValidationError.
+    with pytest.raises(ValidationError) as ex:
+        modifier.expression = "does_not_exist()"
+        modifier.clean()
+
+    # The validation message should tell the user what's wrong, and include the
+    # name of the invalid function as well as a list of valid ones.
+    assert "that function does not exist" in str(ex)
+    assert "does_not_exist" in str(ex)
+    assert ", ".join(FormEvaluator.FUNCTIONS.keys()) in str(ex)
+
+    # Field modifiers that encounter other errors (like TypeErrors for
+    # comparisons) should raise a ValidationError.
+    with pytest.raises(ValidationError) as ex:
+        modifier.expression = "'string' > 1"
+        modifier.clean()
+
+    # The validation message should tell the user what's wrong, and include the
+    # exception message.
+    assert "'>' not supported between instances of 'str' and 'int'" in str(ex)
+    assert "expression is invalid" in str(ex)
 
 
 @pytest.mark.django_db
@@ -271,28 +336,31 @@ def test_file_upload() -> None:
 
 
 @pytest.mark.django_db
-def test_invalid_modifier_attribute() -> None:
-    """Ensure that an invalid attribute name on a field modifier raises an
-    error."""
+def test_noop_modifier_attribute() -> None:
+    """Ensure that a nonexistent attribute in a modifier is a noop.
+
+    Field modifiers can be
+    """
     form = FormFactory(label="Broken Field Modifier")
 
     # Define a field that has a modifier that tries to change a nonexistent attribute.
-    broken_field = FieldFactory(
+    field = FieldFactory(
         form=form,
-        label="Is this broken?",
-        name="broken",
+        label="Are we testing?",
+        name="test_field",
         field_type=YesNoRadioField.name(),
         required=True,
     )
-    broken_field.field_modifiers.create(
-        attribute="does_not_exist",
-        expression="empty(broken)",
+    modifier = field.field_modifiers.create(
+        attribute="noop_modifier",
+        expression=f"empty({field.name})",
     )
 
-    # An error should be thrown because does_not_exist is not an attribute of a
-    # form field.
-    with pytest.raises(LookupError):
-        form.as_django_form()
+    django_form = form.as_django_form()
+
+    # The only effect an unhandled modifier should have is to be present in the
+    # modifiers dict.
+    assert modifier.attribute in django_form.fields[field.name]._modifiers
 
 
 @settings(deadline=None, suppress_health_check=(HealthCheck.too_slow,))

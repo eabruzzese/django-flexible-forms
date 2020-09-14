@@ -199,25 +199,28 @@ class FlexibleField:
         Returns:
             form_fields.Field: The given form field, modified using the modifiers.
         """
-        for attribute_name, value_expression in field_modifiers:
+        # Create a "_modifiers" dict on the field where the resuts of all
+        # modifier expressions will be stored. This is helpful for debugging
+        # and for modifiers that have no backend side-effects (i.e., the value
+        # of the modifier is only used in something like a frontend app).
+        setattr(form_field, "_modifiers", getattr(form_field, "_modifiers", {}))
+
+        for attribute, expression in field_modifiers:
             # Evaluate the expression and set the attribute specified by
-            # `self.attribute_name` to the value it returns.
+            # `self.attribute` to the value it returns.
             try:
-                modified_value = evaluate_expression(
-                    value_expression,
-                    names=field_values,
-                )
+                expression_value = evaluate_expression(expression, names=field_values)
             except simpleeval.NameNotDefined:
                 continue
 
             # If the caller has implemented a custom apply_ATTRIBUTENAME method
             # to handle application of the attribute, use it.
-            custom_applicator = getattr(cls, f"apply_{attribute_name}", None)
+            custom_applicator = getattr(cls, f"apply_{attribute}", None)
             if custom_applicator:
                 form_field = custom_applicator(
                     **{
                         "form_field": form_field,
-                        attribute_name: modified_value,
+                        attribute: expression_value,
                         "field_values": field_values,
                     }
                 )
@@ -225,18 +228,12 @@ class FlexibleField:
             # If no custom applicator method is implemented, but the form field
             # has an attribute with the specified name, set its value to the
             # result of the expression.
-            elif hasattr(form_field, attribute_name):
-                setattr(form_field, attribute_name, modified_value)
+            elif hasattr(form_field, attribute):
+                setattr(form_field, attribute, expression_value)
 
-            # If the field has no attribute with the specified name, and no
-            # applicator method has been implemented to handle the custom
-            # attribute, throw an error.
-            else:
-                raise LookupError(
-                    f"Attempted to modify `{attribute_name}` for {type(form_field)} form field "
-                    f"`{form_field.label}`, but the field has no attribute `{attribute_name}`, and "
-                    f"no `apply_{attribute_name}` method exists on `{type(cls)}`.",
-                )
+            # Finally, add the modifier and its value to the "modifiers" dict
+            # on the field.
+            form_field._modifiers[attribute] = expression_value
 
         return form_field
 

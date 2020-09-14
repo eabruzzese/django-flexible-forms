@@ -4,6 +4,13 @@
 
 import logging
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Type, cast
+from django.core.exceptions import ValidationError
+from simpleeval import (
+    AttributeDoesNotExist,
+    FunctionNotDefined,
+    InvalidExpression,
+    NameNotDefined,
+)
 
 import swapper
 from django import forms
@@ -15,7 +22,7 @@ from django.utils.functional import cached_property
 from django.utils.text import slugify
 
 from flexible_forms.fields import FIELD_TYPES
-from flexible_forms.utils import get_record_model
+from flexible_forms.utils import FormEvaluator, evaluate_expression, get_record_model
 
 try:
     from django.db.models import JSONField  # type: ignore
@@ -345,6 +352,63 @@ class BaseFieldModifier(models.Model):
 
     attribute = models.TextField()
     expression = models.TextField()
+
+    def clean(self) -> None:
+        """Ensure that the expression is valid for the form.
+
+        Checks to make sure that referenced names and functions are defined
+        before saving.
+        """
+        super().clean()
+
+        # Validate that the expression is valid for the form. This is
+        # accomplished by building a dict of initial values for all fields on
+        # the form and running it through the expression evaluator. If any
+        # exceptions are raised, they are returned as validation errors.
+        field_values = {f.name: f.initial for f in self.field.form.fields.all()}
+
+        try:
+            evaluate_expression(self.expression, names=field_values)
+
+        # If the expression references a name that isn't a field on the form
+        # (or a builtin), raise a validation error.
+        except NameNotDefined as ex:
+            valid_fields = ", ".join(field_values.keys())
+            name = getattr(ex, "name", "")
+            raise ValidationError(
+                {
+                    "expression": (
+                        f"The expression references a variable named '{name}', but no "
+                        f"field with that name exists in the form. Valid fields are: "
+                        f"{valid_fields}."
+                    )
+                }
+            )
+
+        # If the expression references a function that isn't in scope for the
+        # expression, raise a validation error.
+        except FunctionNotDefined as ex:
+            valid_functions = ", ".join(FormEvaluator.FUNCTIONS.keys())
+            func_name = getattr(ex, "func_name", "")
+            raise ValidationError(
+                {
+                    "expression": (
+                        f"The expression is trying to use the function {func_name}, "
+                        f"but that function does not exist, or cannot be used in "
+                        f"expressions. Valid functions are: {valid_functions}"
+                    )
+                }
+            )
+
+        # If the expression encounters another error (e.g., TypeError).
+        except BaseException as ex:
+            raise ValidationError(
+                {
+                    "expression": (
+                        f"The expression is invalid. Error message: '{str(ex)}'"
+                    )
+                }
+            )
 
     class Meta:
         abstract = True

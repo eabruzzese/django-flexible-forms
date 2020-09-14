@@ -79,11 +79,11 @@ def _generate_uploaded_file(
     Simulates a file that has been uploaded and handled by Django.
 
     Args:
-        name (Optional[str]): The name of the file. Defaults to a newly-generated
+        name: The name of the file. Defaults to a newly-generated
             UUIDv4 if left unspecified.
-        content (Optional[bytes]): The contents of the file. Defaults to an empty
+        content: The contents of the file. Defaults to an empty
             bytestring if left unspectified.
-        content_type (Optional[str]): The Content-Type of the file. Defaults to
+        content_type: The Content-Type of the file. Defaults to
             "application/octet-stream" (a binary file) if left unspecified.
 
     Returns:
@@ -102,7 +102,7 @@ def file_strategy(
     """Define a binary file upload generation strategy for Hypothesis.
 
     Args:
-        strategies (Any): Keyword arguments to be passed to the builds strategy
+        strategies: Keyword arguments to be passed to the builds strategy
             for _generate_uploaded_file.
 
     Returns:
@@ -125,7 +125,7 @@ def image_strategy(
     """Define an image file upload generation strategy for Hypothesis.
 
     Args:
-        strategies (Any): Keyword arguments to be passed to the file_strategy.
+        strategies: Keyword arguments to be passed to the file_strategy.
 
     Returns:
         st.SearchStrategy[SimpleUploadedFile]: A Hypothesis search strategy that
