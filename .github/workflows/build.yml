@@ -4,13 +4,11 @@ on:
   push:
     paths-ignore:
       - "docs/**"
-      - ".cirrus.yml"
     branches:
       - master
   pull_request:
     paths-ignore:
       - "docs/**"
-      - ".cirrus.yml"
     branches:
       - "**"
 
