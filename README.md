@@ -230,9 +230,9 @@ Customizing the models is pretty simple.
 # your_app/models.py
 
 from django.db import models
-from flexible_forms.models import BaseForm
+from flexible_forms.models import Form
 
-class CustomForm(BaseForm):
+class CustomForm(Form):
     # Add your custom attributes, etc.
     custom_attribute = models.TextField()
 ```
@@ -262,26 +262,26 @@ override all of the builtin models:
 # your_app/models.py
 
 from flexible_forms.models import (
-    BaseForm,
-    BaseField,
-    BaseFieldModifier,
-    BaseRecord,
-    BaseRecordAttribute
+    Form,
+    Field,
+    FieldModifier,
+    Record,
+    RecordAttribute
 )
 
-class Form(BaseForm):
+class Form(Form):
     """A custom implementation of flexible_forms.Form."""
 
-class Field(BaseField):
+class Field(Field):
     """A custom implementation of flexible_forms.Field."""
 
-class FieldModifier(BaseFieldModifier):
+class FieldModifier(FieldModifier):
     """A custom implementation of flexible_forms.FieldModifier."""
 
-class Record(BaseRecord):
+class Record(Record):
     """A custom implementation of flexible_forms.Record."""
 
-class RecordAttribute(BaseRecordAttribute):
+class RecordAttribute(RecordAttribute):
     """A custom implementation of flexible_forms.RecordAttribute."""
 ```
 

@@ -2,19 +2,14 @@
 """Forms that power the flexible_forms module."""
 
 import datetime
-from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional, cast
+from typing import Any, Dict, Mapping, Optional, cast
 
 from django import forms
 from django.core.files.base import File
 from django.db import transaction
 from django.forms.fields import FileField
 
-from flexible_forms.utils import get_record_model
-
-Record = get_record_model()
-
-if TYPE_CHECKING:  # pragma: no cover
-    from flexible_forms.models import BaseRecord
+from flexible_forms.models import Record
 
 
 class RecordForm(forms.ModelForm):
@@ -32,7 +27,7 @@ class RecordForm(forms.ModelForm):
         self,
         data: Optional[Mapping[str, Any]] = None,
         files: Optional[Mapping[str, File]] = None,
-        instance: Optional["BaseRecord"] = None,
+        instance: Optional["Record"] = None,
         initial: Optional[Mapping[str, Any]] = None,
         **kwargs: Any,
     ) -> None:
@@ -68,7 +63,7 @@ class RecordForm(forms.ModelForm):
         return cleaned_data
 
     @transaction.atomic
-    def save(self, commit: bool = True) -> "BaseRecord":
+    def save(self, commit: bool = True) -> "Record":
         """Save the form data to a Record.
 
         Maps the cleaned form data into the Record's _data field.
@@ -79,7 +74,7 @@ class RecordForm(forms.ModelForm):
         Returns:
             instance: The Record model instance.
         """
-        record = cast("BaseRecord", super().save(commit=False))
+        record = cast("Record", super().save(commit=False))
 
         # If nothing has changed, noop and return the record as-is.
         if not self.has_changed():

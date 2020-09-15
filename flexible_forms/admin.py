@@ -3,7 +3,7 @@
 """Django admin configurations for flexible_forms."""
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional, Type, cast
+from typing import Any, Optional, Type, cast
 
 from django import forms
 from django.conf import settings
@@ -30,21 +30,7 @@ else:  # pragma: no cover
     StackedInline = admin.StackedInline
     TabularInline = admin.TabularInline
 
-from flexible_forms.utils import (
-    get_field_model,
-    get_field_modifier_model,
-    get_form_model,
-    get_record_model,
-)
-
-# Load our swappable models.
-Field = get_field_model()
-FieldModifier = get_field_modifier_model()
-Form = get_form_model()
-Record = get_record_model()
-
-if TYPE_CHECKING:  # pragma: no cover
-    from flexible_forms.models import BaseForm, BaseRecord
+from flexible_forms.models import Field, FieldModifier, Form, Record
 
 
 class FieldModifiersInline(TabularInline):
@@ -104,7 +90,7 @@ class FormsAdmin(ModelAdmin):
 
     inlines = (FieldsInline,)
 
-    def get_queryset(self, *args: Any, **kwargs: Any) -> "models.QuerySet[BaseForm]":
+    def get_queryset(self, *args: Any, **kwargs: Any) -> "models.QuerySet[Form]":
         """Overrides the default queryset to optimize fetches.
 
         Args:
@@ -115,7 +101,7 @@ class FormsAdmin(ModelAdmin):
             models.QuerySet[Form]: An optimized queryset.
         """
         return cast(
-            "models.QuerySet[BaseForm]",
+            "models.QuerySet[Form]",
             (
                 super()
                 .get_queryset(*args, **kwargs)
@@ -124,7 +110,7 @@ class FormsAdmin(ModelAdmin):
             ),
         )
 
-    def _fields_count(self, form: "BaseForm") -> int:
+    def _fields_count(self, form: "Form") -> int:
         """The number of fields related to this form.
 
         Args:
@@ -138,7 +124,7 @@ class FormsAdmin(ModelAdmin):
     _fields_count.short_description = "Fields"  # type: ignore
     _fields_count.admin_order_field = "fields__count"  # type: ignore
 
-    def _records_count(self, form: "BaseForm") -> SafeText:
+    def _records_count(self, form: "Form") -> SafeText:
         """The number of records related to this form.
 
         Args:
@@ -162,7 +148,7 @@ class FormsAdmin(ModelAdmin):
     _records_count.short_description = "Records"  # type: ignore
     _records_count.admin_order_field = "records__count"  # type: ignore
 
-    def _add_record(self, form: "BaseForm") -> SafeText:
+    def _add_record(self, form: "Form") -> SafeText:
         app_label = Record._meta.app_label  # noqa: WPS437
         model_name = Record._meta.model_name  # noqa: WPS437
 
@@ -178,9 +164,6 @@ class FormsAdmin(ModelAdmin):
         )  # noqa: S308, S703, E501
 
 
-admin.site.register(Form, FormsAdmin)
-
-
 class RecordsAdmin(admin.ModelAdmin):
     """An admin configuration for managing records."""
 
@@ -188,7 +171,7 @@ class RecordsAdmin(admin.ModelAdmin):
         self,
         *args: Any,
         **kwargs: Any,
-    ) -> "models.QuerySet[BaseRecord]":
+    ) -> "models.QuerySet[Record]":
         """Overrides the default queryset to optimize fetches.
 
         Args:
@@ -196,7 +179,7 @@ class RecordsAdmin(admin.ModelAdmin):
             kwargs: (Passed to super)
 
         Returns:
-            models.QuerySet[BaseRecord]: An optimized queryset.
+            models.QuerySet[Record]: An optimized queryset.
         """
         return (
             super()
@@ -208,7 +191,7 @@ class RecordsAdmin(admin.ModelAdmin):
     def get_form(
         self,
         request: HttpRequest,
-        obj: Optional["BaseRecord"] = None,
+        obj: Optional["Record"] = None,
         *args: Any,
         **kwargs: Any,
     ) -> Type[forms.BaseForm]:
@@ -280,6 +263,3 @@ class RecordsAdmin(admin.ModelAdmin):
             return HttpResponseRedirect(change_url)
 
         return super().add_view(request, *args, **kwargs)
-
-
-admin.site.register(Record, RecordsAdmin)

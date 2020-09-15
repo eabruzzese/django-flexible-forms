@@ -5,7 +5,6 @@
 import logging
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Type, cast
 
-import swapper
 from django import forms
 from django.core.exceptions import ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
@@ -17,11 +16,7 @@ from django.utils.text import slugify
 from simpleeval import FunctionNotDefined, NameNotDefined
 
 from flexible_forms.fields import FIELD_TYPES
-from flexible_forms.utils import (
-    FormEvaluator,
-    evaluate_expression,
-    get_record_model,
-)
+from flexible_forms.utils import FormEvaluator, evaluate_expression
 
 try:
     from django.db.models import JSONField  # type: ignore
@@ -48,7 +43,7 @@ FIELD_TYPE_OPTIONS = sorted(
 )
 
 
-class BaseForm(models.Model):
+class Form(models.Model):
     """A model representing a single type of customizable form."""
 
     name = models.TextField(
@@ -64,9 +59,6 @@ class BaseForm(models.Model):
         help_text="The human-friendly name of the form.",
     )
     description = models.TextField(blank=True, default="")
-
-    class Meta:
-        abstract = True
 
     def __str__(self) -> str:
         return self.label or "New Form"
@@ -88,7 +80,7 @@ class BaseForm(models.Model):
         self,
         data: Optional[Mapping[str, Any]] = None,
         files: Optional[Mapping[str, Any]] = None,
-        instance: Optional["BaseRecord"] = None,
+        instance: Optional["Record"] = None,
         initial: Optional[Mapping[str, Any]] = None,
         **kwargs: Any,
     ) -> "RecordForm":
@@ -116,9 +108,6 @@ class BaseForm(models.Model):
 
         if isinstance(initial, MultiValueDict):
             initial = initial.dict()
-
-        # We must cast to Any here; mypy errors out otherwise.
-        Record = cast(Any, get_record_model())
 
         instance = instance or Record(form=self)
         data = {**(data or instance.data), "form": self.pk}
@@ -175,14 +164,7 @@ class BaseForm(models.Model):
         return form_instance
 
 
-class Form(BaseForm):
-    """A swappable concrete implementation of a flexible form."""
-
-    class Meta:
-        swappable = swapper.swappable_setting("flexible_forms", "Form")
-
-
-class BaseField(models.Model):
+class Field(models.Model):
     """A field on a form.
 
     A field belonging to a Form. Attempts to emulate a subset of
@@ -244,14 +226,13 @@ class BaseField(models.Model):
     )
 
     form = models.ForeignKey(
-        swapper.get_model_name("flexible_forms", "Form"),
+        Form,
         on_delete=models.CASCADE,
         related_name="fields",
         editable=False,
     )
 
     class Meta:
-        abstract = True
         unique_together = ("form", "name")
         order_with_respect_to = "form"
 
@@ -318,14 +299,7 @@ class BaseField(models.Model):
         )
 
 
-class Field(BaseField):
-    """A concrete implementation of Field."""
-
-    class Meta:
-        swappable = swapper.swappable_setting("flexible_forms", "Field")
-
-
-class BaseFieldModifier(models.Model):
+class FieldModifier(models.Model):
     """A dynamic expression for customizing field rendering behavior.
 
     A FieldModifier is essentially a map of `attribute` -> `expression`,
@@ -358,7 +332,7 @@ class BaseFieldModifier(models.Model):
     """
 
     field = models.ForeignKey(
-        swapper.get_model_name("flexible_forms", "Field"),
+        Field,
         on_delete=models.CASCADE,
         related_name="field_modifiers",
         editable=False,
@@ -450,19 +424,6 @@ class BaseFieldModifier(models.Model):
             self.clean()
         super().save(*args, **kwargs)
 
-    class Meta:
-        abstract = True
-
-
-class FieldModifier(BaseFieldModifier):
-    """A concrete implementation of FieldModifier."""
-
-    class Meta:
-        swappable = swapper.swappable_setting(
-            "flexible_forms",
-            "FieldModifier",
-        )
-
 
 class RecordManager(models.Manager):
     """A manager for Records.
@@ -471,13 +432,13 @@ class RecordManager(models.Manager):
     relationships.
     """
 
-    def get_queryset(self) -> "models.QuerySet[BaseRecord]":
+    def get_queryset(self) -> "models.QuerySet[Record]":
         """Define the default QuerySet for fetching Records.
 
         Eagerly fetches often-used relationships automatically.
 
         Returns:
-            models.QuerySet['BaseRecord']: An optimized queryset of Records.
+            models.QuerySet['Record']: An optimized queryset of Records.
         """
         return (
             super()
@@ -487,19 +448,16 @@ class RecordManager(models.Manager):
         )
 
 
-class BaseRecord(models.Model):
+class Record(models.Model):
     """An instance of a Form."""
 
     form = models.ForeignKey(
-        swapper.get_model_name("flexible_forms", "Form"),
+        Form,
         on_delete=models.CASCADE,
         related_name="records",
     )
 
     objects = RecordManager()
-
-    class Meta:
-        abstract = True
 
     def __str__(self) -> str:
         return f"Record {self.pk} (form_id={self.form_id})"
@@ -509,11 +467,11 @@ class BaseRecord(models.Model):
         self._staged_changes: Mapping[str, Any] = {}
 
     @property
-    def fields(self) -> Mapping[str, BaseField]:
+    def fields(self) -> Mapping[str, Field]:
         """Return a map of Fields for the Record's form, keyed by their names.
 
         Returns:
-            Mapping[str, BaseField]: A mapping of Field instances by their
+            Mapping[str, Field]: A mapping of Field instances by their
                 names.
         """
         return {f.name: f for f in self.form.fields.all()}
@@ -543,10 +501,6 @@ class BaseRecord(models.Model):
             value: The value.
             commit: True if the record should be persisted.
         """
-        RecordAttribute = swapper.load_model(
-            "flexible_forms",
-            "RecordAttribute",
-        )
         if commit:
             RecordAttribute.objects.update_or_create(
                 record=self,
@@ -580,14 +534,7 @@ class BaseRecord(models.Model):
         self._invalidate_cache()
 
 
-class Record(BaseRecord):
-    """The default Record implementation."""
-
-    class Meta:
-        swappable = swapper.swappable_setting("flexible_forms", "Record")
-
-
-class BaseRecordAttribute(models.Model):
+class RecordAttribute(models.Model):
     """A value for an attribute on a single Record."""
 
     ##
@@ -597,19 +544,19 @@ class BaseRecordAttribute(models.Model):
     #
     _VALUE_FIELD_PREFIX = "_value_"
 
-    class Meta:
-        abstract = True
-
     record = models.ForeignKey(
-        swapper.get_model_name("flexible_forms", "Record"),
+        Record,
         on_delete=models.CASCADE,
         related_name="attributes",
     )
     field = models.ForeignKey(
-        swapper.get_model_name("flexible_forms", "Field"),
+        Field,
         on_delete=models.CASCADE,
         related_name="attributes",
     )
+
+    def __str__(self) -> str:
+        return f"RecordAttribute {self.pk} (record_id={self.record_id})"
 
     @classmethod
     def get_value_field_name(cls, field_type: str) -> str:
@@ -672,24 +619,14 @@ class BaseRecordAttribute(models.Model):
 
 
 ##
-# Add individual fields for each supported datatype to BaseRecordAttribute.
+# Add individual fields for each supported datatype to RecordAttribute.
 #
 # The EAV pattern used for storing form submissions (Records) achieves lossless
 # storage by creating a column of an appropriate datatype for each supported
 # field.
 #
 for field_type, field in sorted(FIELD_TYPES.items(), key=lambda f: f[0]):
-    BaseRecordAttribute.add_to_class(  # type: ignore
-        BaseRecordAttribute.get_value_field_name(field_type),
+    RecordAttribute.add_to_class(  # type: ignore
+        RecordAttribute.get_value_field_name(field_type),
         field.as_model_field(blank=True, null=True, default=None),
     )
-
-
-class RecordAttribute(BaseRecordAttribute):
-    """The default RecordAttribute implementation."""
-
-    class Meta:
-        swappable = swapper.swappable_setting(
-            "flexible_forms",
-            "RecordAttribute",
-        )

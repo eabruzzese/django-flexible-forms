@@ -5,16 +5,14 @@ import uuid
 
 from django.db import models
 
-from flexible_forms.models import (
-    BaseField,
-    BaseFieldModifier,
-    BaseForm,
-    BaseRecord,
-    BaseRecordAttribute,
-)
+from flexible_forms.models import Field as BaseField
+from flexible_forms.models import FieldModifier as BaseFieldModifier
+from flexible_forms.models import Form as BaseForm
+from flexible_forms.models import Record as BaseRecord
+from flexible_forms.models import RecordAttribute as BaseRecordAttribute
 
 
-class CustomBaseModel(models.Model):
+class BaseModel(models.Model):
     """A custom base model to simulate a common swapping scenario.
 
     Often, users of the package will have a common base model that they want
@@ -32,26 +30,26 @@ class CustomBaseModel(models.Model):
         abstract = True
 
 
-class CustomForm(BaseForm, CustomBaseModel):
+class Form(BaseForm, BaseModel):
     """A customized and swapped-out version of the Form provided by
     flexible_forms."""
 
 
-class CustomField(BaseField, CustomBaseModel):
+class Field(BaseField, BaseModel):
     """A customized and swapped-out version of the Field provided by
     flexible_forms."""
 
 
-class CustomRecord(BaseRecord, CustomBaseModel):
-    """A customized and swapped-out version of the Record provided by
-    flexible_forms."""
-
-
-class CustomRecordAttribute(BaseRecordAttribute, CustomBaseModel):
+class FieldModifier(BaseFieldModifier, BaseModel):
     """A customized and swapped-out version of the RecordAttribute provided by
     flexible_forms."""
 
 
-class CustomFieldModifier(BaseFieldModifier, CustomBaseModel):
+class Record(BaseRecord, BaseModel):
+    """A customized and swapped-out version of the Record provided by
+    flexible_forms."""
+
+
+class RecordAttribute(BaseRecordAttribute, BaseModel):
     """A customized and swapped-out version of the RecordAttribute provided by
     flexible_forms."""

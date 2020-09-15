@@ -22,11 +22,11 @@ setup(
     license='MIT',
     packages=['flexible_forms'],
     package_dir={"": "."},
-    package_data={},
+    package_data={"flexible_forms": ["*.swp"]},
     install_requires=[
-        'django>=2.2',
+        'django>=2.2', 'django-polymorphic==3.*,>=3.0.0',
         'importlib-metadata==1.*,>=1.7.0; python_version < "3.8"',
-        'simpleeval==0.*,>=0.9.10', 'swapper==1.*,>=1.1.2'
+        'simpleeval==0.*,>=0.9.10'
     ],
     extras_require={
         "dev": [
