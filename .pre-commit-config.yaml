@@ -131,3 +131,20 @@ repos:
             docs/.*|
             tests/.*
           )
+
+  ##
+  # dephell
+  #
+  # Generates a setup.py file from pyproject.toml.
+  #
+  - repo: local
+    hooks:
+      - id: dephell
+        name: dephell
+        entry: dephell deps convert
+        language: python_venv
+        files: "^pyproject.toml$"
+        pass_filenames: false
+        require_serial: true
+        additional_dependencies:
+          - dephell[full]
