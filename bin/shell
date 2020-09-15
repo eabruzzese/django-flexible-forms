@@ -1,0 +1,20 @@
+#!/usr/bin/env sh
+
+set -eu
+[ "${DEBUG:-}" ] && set -x
+
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+TESTS_DIR="$PROJECT_ROOT/tests"
+
+main () {
+    (
+        # Install the required dependencies.
+        poetry install
+
+        cd "$TESTS_DIR" || exit 1
+
+        poetry run ./manage.py shell "$@"
+    )
+}
+
+main "$@"

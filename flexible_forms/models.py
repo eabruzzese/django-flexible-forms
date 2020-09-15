@@ -68,6 +68,9 @@ class BaseForm(models.Model):
     class Meta:
         abstract = True
 
+    def __str__(self) -> str:
+        return self.label or "New Form"
+
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save the model.
 
@@ -252,6 +255,9 @@ class BaseField(models.Model):
         unique_together = ("form", "name")
         order_with_respect_to = "form"
 
+    def __str__(self) -> str:
+        return self.label or "New Field"
+
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save the model.
 
@@ -361,6 +367,12 @@ class BaseFieldModifier(models.Model):
     attribute = models.TextField()
     expression = models.TextField()
 
+    # For custom expression validation
+    _validated = False
+
+    def __str__(self) -> str:
+        return f"{self.attribute} = {self.expression}"
+
     def clean(self) -> None:
         """Ensure that the expression is valid for the form.
 
@@ -368,6 +380,11 @@ class BaseFieldModifier(models.Model):
         defined before saving.
         """
         super().clean()
+        self._validated = False
+
+        # No field? No Problem!
+        if not hasattr(self, "field"):
+            return
 
         # Validate that the expression is valid for the form. This is
         # accomplished by building a dict of initial values for all fields on
@@ -417,6 +434,21 @@ class BaseFieldModifier(models.Model):
                     )
                 }
             )
+
+        self._validated = True
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Save the record.
+
+        Runs deferred validation.
+
+        Args:
+            args: Passed to super.
+            kwargs: Passed to super.
+        """
+        if not self._validated:
+            self.clean()
+        super().save(*args, **kwargs)
 
     class Meta:
         abstract = True
@@ -468,6 +500,9 @@ class BaseRecord(models.Model):
 
     class Meta:
         abstract = True
+
+    def __str__(self) -> str:
+        return f"Record {self.pk} (form_id={self.form_id})"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
