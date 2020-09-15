@@ -35,13 +35,17 @@ from tests.conftest import ContextManagerFixture
 @pytest.mark.django_db
 def test_form() -> None:
     """Ensure that forms can be created with minimal specification."""
-    form = FormFactory.build(label="Test Form")
+    form = FormFactory.build(label=None)
 
     # Ensure that the form has no machine name until it gets saved to the
     # database.
     assert form.name == ""
 
+    # Ensure the form has a friendly string representation
+    assert str(form) == "New Form"
+
     # Ensure that a name is generated for the form upon save.
+    form.label = "Test Form"
     form.save()
     assert form.name == "test_form"
 
@@ -51,13 +55,16 @@ def test_form() -> None:
     form.save()
     assert form.name == "test_form"
 
+    # Ensure the form's friendly string representation reflects the label
+    assert str(form) == form.label
+
 
 @pytest.mark.django_db
 def test_field() -> None:
     """Ensure that fields can be created within a form."""
     field = FieldFactory.build(
         form=FormFactory(),
-        label="Test Field",
+        label=None,
         field_type=SingleLineTextField.name(),
     )
 
@@ -65,7 +72,11 @@ def test_field() -> None:
     # database.
     assert field.name == ""
 
+    # Ensure the field has a friendly string representation
+    assert str(field) == "New Field"
+
     # Ensure that a machine name is generated for the field on save.
+    field.label = "Test Field"
     field.save()
     assert field.name == "test_field"
 
@@ -74,6 +85,9 @@ def test_field() -> None:
     field.label = "Updated Test Field"
     field.save()
     assert field.name == "test_field"
+
+    # Ensure the field's friendly string representation reflects the label
+    assert str(field) == "Updated Test Field"
 
     # Ensure that a Django form field instance can be produced from the field.
     assert isinstance(field.as_form_field(), forms.Field)
@@ -108,6 +122,9 @@ def test_field_modifier() -> None:
 
     # Valid field modifiers should pass validation.
     modifier.clean()
+
+    # Ensure the field modifier has a friendly string representation
+    assert str(modifier) == "required = True"
 
     # Field modifiers that reference fields that don't exist should raise a
     # ValidationError.
@@ -453,6 +470,9 @@ def test_record(
         # Assert that saving the Django form results in a Record instance.
         record = django_form_instance.save()
         assert isinstance(record, CustomRecord)
+
+        # Ensure form record has a friendly string representation
+        assert str(record) == f"Record {record.pk} (form_id={record.form_id})"
 
         # Re-fetch the record so that we can test prefetching.
         record = CustomRecord.objects.get(pk=record.pk)

@@ -68,6 +68,9 @@ class BaseForm(models.Model):
     class Meta:
         abstract = True
 
+    def __str__(self) -> str:
+        return self.label or "New Form"
+
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save the model.
 
@@ -252,6 +255,9 @@ class BaseField(models.Model):
         unique_together = ("form", "name")
         order_with_respect_to = "form"
 
+    def __str__(self) -> str:
+        return self.label or "New Field"
+
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save the model.
 
@@ -361,6 +367,9 @@ class BaseFieldModifier(models.Model):
     attribute = models.TextField()
     expression = models.TextField()
 
+    def __str__(self) -> str:
+        return f"{self.attribute} = {self.expression}"
+
     def clean(self) -> None:
         """Ensure that the expression is valid for the form.
 
@@ -468,6 +477,9 @@ class BaseRecord(models.Model):
 
     class Meta:
         abstract = True
+
+    def __str__(self) -> str:
+        return f"Record {self.pk} (form_id={self.form_id})"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
