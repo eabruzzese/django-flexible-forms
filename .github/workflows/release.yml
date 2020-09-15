@@ -44,15 +44,12 @@ jobs:
         run: poetry install --no-dev
 
       # Build and publish the package.
-      - name: Build project for distribution
-        run: |
-          poetry run poetry build
       - name: Publish to PyPI
         env:
           POETRY_PYPI_TOKEN_PYPI: ${{ secrets.PYPI_TOKEN }}
         run: |
           poetry run poetry version ${{ steps.tag.outputs.tag }}
-          poetry run poetry publish
+          poetry run poetry publish --build
 
       # Create a GitHub release for the version.
       - name: Create GitHub release
