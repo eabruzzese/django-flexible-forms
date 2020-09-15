@@ -30,6 +30,15 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # Set up Poetry
+      - name: Install poetry
+        uses: abatilo/actions-poetry@v2.0.0
+        with:
+          poetry-version: ${{ matrix.poetry-version }}
+      - name: Configure poetry
+        shell: bash
+        run: poetry config virtualenvs.in-project true
+
       # Set up the cache.
       - name: Get full Python version
         id: full-python-version
@@ -47,16 +56,9 @@ jobs:
         run: poetry run pip --version >/dev/null 2>&1 || rm -rf .venv
 
       # Install and configure our dependencies.
-      - name: Install poetry
-        uses: abatilo/actions-poetry@v2.0.0
-        with:
-          poetry-version: ${{ matrix.poetry-version }}
       - name: Upgrade pip
         shell: bash
         run: poetry run python -m pip install --upgrade pip
-      - name: Configure poetry
-        shell: bash
-        run: poetry config virtualenvs.in-project true
       - name: Install dependencies
         shell: bash
         run: poetry install
