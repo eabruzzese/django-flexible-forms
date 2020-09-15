@@ -367,6 +367,9 @@ class BaseFieldModifier(models.Model):
     attribute = models.TextField()
     expression = models.TextField()
 
+    # For custom expression validation
+    _validated = False
+
     def __str__(self) -> str:
         return f"{self.attribute} = {self.expression}"
 
@@ -377,6 +380,11 @@ class BaseFieldModifier(models.Model):
         defined before saving.
         """
         super().clean()
+        self._validated = False
+
+        # No field? No Problem!
+        if not hasattr(self, "field"):
+            return
 
         # Validate that the expression is valid for the form. This is
         # accomplished by building a dict of initial values for all fields on
@@ -426,6 +434,21 @@ class BaseFieldModifier(models.Model):
                     )
                 }
             )
+
+        self._validated = True
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Save the record.
+
+        Runs deferred validation.
+
+        Args:
+            args: Passed to super.
+            kwargs: Passed to super.
+        """
+        if not self._validated:
+            self.clean()
+        super().save(*args, **kwargs)
 
     class Meta:
         abstract = True

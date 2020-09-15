@@ -120,8 +120,16 @@ def test_field_modifier() -> None:
 
     modifier = field_2.field_modifiers.create(attribute="required", expression="True")
 
-    # Valid field modifiers should pass validation.
+    # If the modifier has no field, defer validation until save
+    modifier.field = None
     modifier.clean()
+    assert not modifier._validated
+    modifier.field = field_2
+    modifier.save()
+    assert modifier._validated
+    # Saving after validating should not result in a call to clean()
+    modifier.save()
+    assert modifier._validated
 
     # Ensure the field modifier has a friendly string representation
     assert str(modifier) == "required = True"
