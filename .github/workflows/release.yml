@@ -7,18 +7,55 @@ on:
 
 jobs:
   release:
+    strategy:
+      matrix:
+        poetry-version: [1.0.10]
     name: Release
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
+      # Check out the code.
+      - uses: actions/checkout@v2
 
-      - name: Get tag
+      # Get the tag from the GitHub ref.
+      - name: Resolve tag
         id: tag
         run: |
           echo ::set-output name=tag::${GITHUB_REF#refs/tags/}
 
-      - name: Create Release
+      # Set up Python.
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: "3.8"
+
+      # Install and configure our dependencies.
+      - name: Install poetry
+        uses: abatilo/actions-poetry@v2.0.0
+        with:
+          poetry-version: ${{ matrix.poetry-version }}
+      - name: Upgrade pip
+        shell: bash
+        run: poetry run python -m pip install --upgrade pip
+      - name: Configure poetry
+        shell: bash
+        run: poetry config virtualenvs.in-project true
+      - name: Install dependencies
+        shell: bash
+        run: poetry install --no-dev
+
+      # Build and publish the package.
+      - name: Build project for distribution
+        run: |
+          poetry run poetry build
+      - name: Publish to PyPI
+        env:
+          POETRY_PYPI_TOKEN_PYPI: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          poetry run poetry version ${{ steps.tag.outputs.tag }}
+          poetry run poetry publish
+
+      # Create a GitHub release for the version.
+      - name: Create GitHub release
         id: create_release
         uses: actions/create-release@v1
         env:
@@ -28,31 +65,3 @@ jobs:
           release_name: ${{ steps.tag.outputs.tag }}
           draft: false
           prerelease: false
-
-      - name: Set up Python 3.8
-        uses: actions/setup-python@v2
-        with:
-          python-version: "3.8"
-
-      - name: Install poetry
-        shell: bash
-        run: |
-          curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py > get-poetry.py
-          python get-poetry.py -y --preview
-          echo "::set-env name=PATH::$HOME/.poetry/bin:$PATH"
-
-      - name: Install dependencies
-        shell: bash
-        run: poetry install --no-dev
-
-      - name: Build project for distribution
-        run: |
-          source $HOME/.poetry/env
-          poetry run poetry build
-
-      - name: Publish to PyPI
-        env:
-          POETRY_PYPI_TOKEN_PYPI: ${{ secrets.PYPI_TOKEN }}
-        run: |
-          source $HOME/.poetry/env
-          poetry run poetry publish
