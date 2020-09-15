@@ -83,6 +83,10 @@ repos:
     hooks:
       - id: black
         language_version: python3
+        exclude: >
+          (?x)^(
+            setup\.py
+          )
 
   ##
   # docformatter
