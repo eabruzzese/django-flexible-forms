@@ -4,6 +4,8 @@ __pycache__/
 
 # Editor artifacts.
 .vscode/
+*.swp
+*.swo
 
 # Testing artifacts.
 .pytest_cache/

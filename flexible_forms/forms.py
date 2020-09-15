@@ -86,20 +86,15 @@ class RecordForm(forms.ModelForm):
             return record
 
         # Update any changed attributes.
+        for field_name in self.changed_data:
+            cleaned_value = self.cleaned_data[field_name]
+
+            if field_name in self.Meta.fields:
+                setattr(record, field_name, cleaned_value)
+            else:
+                record.set_attribute(field_name, cleaned_value, commit=False)
+
         if commit:
-            for field_name in self.changed_data:
-                cleaned_value = self.cleaned_data[field_name]
-
-                if field_name in self.Meta.fields:
-                    setattr(record, field_name, cleaned_value)
-                else:
-                    record.set_attribute(field_name, cleaned_value)
-
-                record.save()
-        else:
-            record_data = self.cleaned_data.copy()
-            del record_data["form"]
-            record._invalidate_cache()
-            record.data = self.cleaned_data
+            record.save()
 
         return record
