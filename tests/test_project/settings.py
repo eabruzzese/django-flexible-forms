@@ -130,8 +130,8 @@ MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
 
 # Swappable model overrides for flexible_forms
-FLEXIBLE_FORMS_FORM_MODEL = "test_app.CustomForm"
-FLEXIBLE_FORMS_FIELD_MODEL = "test_app.CustomField"
-FLEXIBLE_FORMS_RECORD_MODEL = "test_app.CustomRecord"
-FLEXIBLE_FORMS_RECORDATTRIBUTE_MODEL = "test_app.CustomRecordAttribute"
-FLEXIBLE_FORMS_FIELDMODIFIER_MODEL = "test_app.CustomFieldModifier"
+# FLEXIBLE_FORMS_FORM_MODEL = "test_app.AppForm"
+# FLEXIBLE_FORMS_FIELD_MODEL = "test_app.AppField"
+# FLEXIBLE_FORMS_RECORD_MODEL = "test_app.AppRecord"
+# FLEXIBLE_FORMS_RECORDATTRIBUTE_MODEL = "test_app.AppRecordAttribute"
+# FLEXIBLE_FORMS_FIELDMODIFIER_MODEL = "test_app.AppFieldModifier"

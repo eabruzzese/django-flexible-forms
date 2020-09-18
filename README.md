@@ -187,7 +187,7 @@ your_quest_field = form.fields.create(
     field_type='MultiLineTextField',
     required=True,
 )
-quest_field.field_modifiers.create(
+quest_field.modifiers.create(
     # The attribute is an arbitrary string in the FieldModifier model, but it
     # is expected to be either an attribute of a `django.forms.Field` object,
     # or have a custom handler implemented for it.
@@ -232,7 +232,7 @@ Customizing the models is pretty simple.
 from django.db import models
 from flexible_forms.models import BaseForm
 
-class CustomForm(BaseForm):
+class AppForm(BaseForm):
     # Add your custom attributes, etc.
     custom_attribute = models.TextField()
 ```
@@ -242,7 +242,7 @@ class CustomForm(BaseForm):
 ```python
 # your_app/settings.py
 
-FLEXIBLE_FORMS_FORM_MODEL = "your_app.CustomForm"
+FLEXIBLE_FORMS_FORM_MODEL = "your_app.AppForm"
 ```
 
 ### 3. Be sure to use the `get_modelname_model()` utilities when referencing your form class.
@@ -250,7 +250,7 @@ FLEXIBLE_FORMS_FORM_MODEL = "your_app.CustomForm"
 ```python
 from flexible_forms.utils import get_form_model
 
-Form = get_form_model()  # your_app.CustomForm
+Form = get_form_model()  # your_app.AppForm
 ```
 
 Here's a few handy "kitchen sink" snippets you can use if you want to

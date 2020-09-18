@@ -9,15 +9,11 @@ from django.core.files.base import File
 from django.db import transaction
 from django.forms.fields import FileField
 
-from flexible_forms.utils import get_record_model
-
-Record = get_record_model()
-
 if TYPE_CHECKING:  # pragma: no cover
     from flexible_forms.models import BaseRecord
 
 
-class RecordForm(forms.ModelForm):
+class BaseRecordForm(forms.ModelForm):
     """A Django form for serializing Form submissions into Record objects.
 
     It is used as the base class when generating a Django Form from a
@@ -25,7 +21,6 @@ class RecordForm(forms.ModelForm):
     """
 
     class Meta:
-        model = Record
         fields = ("form",)
 
     def __init__(

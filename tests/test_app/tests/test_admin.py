@@ -7,9 +7,8 @@ from django.contrib.auth import get_user_model
 from django.http import HttpRequest
 from django.http.response import HttpResponseRedirect
 from django.template.response import TemplateResponse
-from test_app.models import CustomForm, CustomRecord
-
-from flexible_forms.admin import FormsAdmin, RecordsAdmin
+from test_app.admin import AppFormsAdmin, AppRecordsAdmin
+from test_app.models import AppForm, AppRecord
 
 from .factories import FieldFactory, FormFactory
 
@@ -18,7 +17,7 @@ from .factories import FieldFactory, FormFactory
 def test_form_admin(django_assert_num_queries: Any) -> None:
     """Ensure that the ModelAdmin for forms renders as expected."""
 
-    forms_admin = FormsAdmin(model=CustomForm, admin_site=AdminSite())
+    forms_admin = AppFormsAdmin(model=AppForm, admin_site=AdminSite())
     super_user = get_user_model().objects.create_superuser(
         username="admin", email="admin@example.com", password="admin"
     )
@@ -45,7 +44,7 @@ def test_form_admin(django_assert_num_queries: Any) -> None:
 def test_record_admin(django_assert_num_queries: Any) -> None:
     """Ensure that the ModelAdmin for records renders as expected."""
 
-    records_admin = RecordsAdmin(model=CustomRecord, admin_site=AdminSite())
+    records_admin = AppRecordsAdmin(model=AppRecord, admin_site=AdminSite())
     super_user = get_user_model().objects.create_superuser(
         username="admin", email="admin@example.com", password="admin"
     )
@@ -69,7 +68,7 @@ def test_record_admin(django_assert_num_queries: Any) -> None:
     add_request._dont_enforce_csrf_checks = True
     add_request.META["SCRIPT_NAME"] = None
     add_response = records_admin.add_view(add_request)
-    assert not CustomRecord.objects.exists()
+    assert not AppRecord.objects.exists()
     assert isinstance(add_response, TemplateResponse)
 
     # Calling get_form() with no instance (i.e., adding a new record from the
@@ -78,7 +77,7 @@ def test_record_admin(django_assert_num_queries: Any) -> None:
     record_form = records_admin.get_form(request=request, obj=None)
     assert set(record_form().fields.keys()) == set(
         f.name
-        for f in CustomRecord._meta.get_fields()
+        for f in AppRecord._meta.get_fields()
         if f.concrete and f.name not in ("id",)
     )
 
@@ -88,7 +87,7 @@ def test_record_admin(django_assert_num_queries: Any) -> None:
     add_request.user = super_user
     add_request.GET["form_id"] = test_form.pk
     add_response = records_admin.add_view(add_request)
-    added_record = CustomRecord.objects.last()
+    added_record = AppRecord.objects.last()
     assert isinstance(add_response, HttpResponseRedirect)
     assert (
         f"{added_record.__class__.__name__.lower()}/{added_record.id}/change"
