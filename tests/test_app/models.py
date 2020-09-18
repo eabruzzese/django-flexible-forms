@@ -11,6 +11,7 @@ from flexible_forms.models import (
     BaseForm,
     BaseRecord,
     BaseRecordAttribute,
+    FlexibleForms,
 )
 
 
@@ -32,26 +33,36 @@ class CustomBaseModel(models.Model):
         abstract = True
 
 
-class CustomForm(BaseForm, CustomBaseModel):
-    """A customized and swapped-out version of the Form provided by
+app_forms = FlexibleForms(model_prefix="App")
+
+
+@app_forms
+class AppForm(BaseForm, CustomBaseModel):
+    """A customized version of the Form provided by flexible_forms."""
+
+
+@app_forms
+class AppField(BaseField, CustomBaseModel):
+    """A customized version of the Field provided by flexible_forms."""
+
+    class Meta(BaseField.Meta):
+        unique_together = ("form", "name", "label")
+
+
+@app_forms
+class AppFieldModifier(BaseFieldModifier, CustomBaseModel):
+    """A customized version of the FieldModifier provided by flexible_forms."""
+
+
+@app_forms
+class AppRecord(BaseRecord, CustomBaseModel):
+    """A customized version of the Record provided by flexible_forms."""
+
+
+@app_forms
+class AppRecordAttribute(BaseRecordAttribute, CustomBaseModel):
+    """A customized version of the RecordAttribute provided by
     flexible_forms."""
 
 
-class CustomField(BaseField, CustomBaseModel):
-    """A customized and swapped-out version of the Field provided by
-    flexible_forms."""
-
-
-class CustomRecord(BaseRecord, CustomBaseModel):
-    """A customized and swapped-out version of the Record provided by
-    flexible_forms."""
-
-
-class CustomRecordAttribute(BaseRecordAttribute, CustomBaseModel):
-    """A customized and swapped-out version of the RecordAttribute provided by
-    flexible_forms."""
-
-
-class CustomFieldModifier(BaseFieldModifier, CustomBaseModel):
-    """A customized and swapped-out version of the RecordAttribute provided by
-    flexible_forms."""
+app_forms.make_flexible()

@@ -2,12 +2,24 @@
 
 """Model definitions for the flexible_forms module."""
 
+import inspect
 import logging
-from typing import TYPE_CHECKING, Any, Mapping, Optional, Type, cast
+import weakref
+from types import ModuleType
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Type,
+    TypeVar,
+    Union,
+    cast,
+)
 
-import swapper
 from django import forms
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.forms.fields import FileField
@@ -17,11 +29,7 @@ from django.utils.text import slugify
 from simpleeval import FunctionNotDefined, NameNotDefined
 
 from flexible_forms.fields import FIELD_TYPES
-from flexible_forms.utils import (
-    FormEvaluator,
-    evaluate_expression,
-    get_record_model,
-)
+from flexible_forms.utils import FormEvaluator, evaluate_expression
 
 try:
     from django.db.models import JSONField  # type: ignore
@@ -31,7 +39,7 @@ except ImportError:  # pragma: no cover
 # If we're only type checking, import things that would otherwise cause an
 # ImportError due to circular dependencies.
 if TYPE_CHECKING:  # pragma: no cover
-    from flexible_forms.forms import RecordForm
+    from flexible_forms.forms import BaseRecordForm
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +99,7 @@ class BaseForm(models.Model):
         instance: Optional["BaseRecord"] = None,
         initial: Optional[Mapping[str, Any]] = None,
         **kwargs: Any,
-    ) -> "RecordForm":
+    ) -> "BaseRecordForm":
         """Return the form represented as a Django form instance.
 
         Args:
@@ -106,7 +114,7 @@ class BaseForm(models.Model):
             **kwargs: Passed to the Django ModelForm constructor.
 
         Returns:
-            RecordForm: A configured RecordForm (a Django ModelForm instance).
+            BaseRecordForm: A configured BaseRecordForm (a Django ModelForm instance).
         """
         if isinstance(data, MultiValueDict):
             data = data.dict()
@@ -117,16 +125,12 @@ class BaseForm(models.Model):
         if isinstance(initial, MultiValueDict):
             initial = initial.dict()
 
-        # We must cast to Any here; mypy errors out otherwise.
-        Record = cast(Any, get_record_model())
+        Record = cast(Type[BaseRecord], self._meta.get_field("records").related_model)
 
-        instance = instance or Record(form=self)
-        data = {**(data or instance.data), "form": self.pk}
+        instance = instance or Record(form=self)  # type: ignore
+        data = cast(Mapping[str, Any], {**(data or instance.data), "form": self.pk})
         files = cast(Mapping[str, Any], files or {})
-        initial = {**(initial or {}), "form": self.pk}
-
-        # The RecordForm is imported inline to prevent a circular import.
-        from flexible_forms.forms import RecordForm
+        initial = cast(Mapping[str, Any], {**(initial or {}), "form": self.pk})
 
         class_name = self.name.title().replace("_", "")
         form_class_name = f"{class_name}Form"
@@ -158,11 +162,15 @@ class BaseForm(models.Model):
         }
 
         # Dynamically generate a form class containing all of the fields.
-        form_class: Type[RecordForm] = type(
+        # The BaseRecordForm is imported inline to prevent a circular import.
+        from flexible_forms.forms import BaseRecordForm
+
+        form_class: Type[BaseRecordForm] = type(
             form_class_name,
-            (RecordForm,),
+            (BaseRecordForm,),
             {
                 "__module__": self.__module__,
+                "Meta": type("Meta", (BaseRecordForm.Meta,), {"model": Record}),
                 **form_fields,
             },
         )
@@ -173,13 +181,6 @@ class BaseForm(models.Model):
         )
 
         return form_instance
-
-
-class Form(BaseForm):
-    """A swappable concrete implementation of a flexible form."""
-
-    class Meta:
-        swappable = swapper.swappable_setting("flexible_forms", "Form")
 
 
 class BaseField(models.Model):
@@ -243,17 +244,13 @@ class BaseField(models.Model):
         encoder=DjangoJSONEncoder,
     )
 
-    form = models.ForeignKey(
-        swapper.get_model_name("flexible_forms", "Form"),
-        on_delete=models.CASCADE,
-        related_name="fields",
-        editable=False,
-    )
+    # The `form` is set by the implementing class.
+    form: models.ForeignKey
 
     class Meta:
         abstract = True
         unique_together = ("form", "name")
-        order_with_respect_to = "form"
+        order_with_respect_to = "name"
 
     def __str__(self) -> str:
         return self.label or "New Field"
@@ -288,9 +285,9 @@ class BaseField(models.Model):
         return FIELD_TYPES[self.field_type].as_form_field(
             **{
                 # Special parameters.
-                "field_modifiers": (
+                "modifiers": (
                     (m.attribute, m.expression)
-                    for m in self.field_modifiers.all()  # type: ignore
+                    for m in self.modifiers.all()  # type: ignore
                 ),
                 "field_values": field_values,
                 "form_widget_options": self.form_widget_options,
@@ -316,13 +313,6 @@ class BaseField(models.Model):
             default=self.initial,
             help_text=self.help_text,
         )
-
-
-class Field(BaseField):
-    """A concrete implementation of Field."""
-
-    class Meta:
-        swappable = swapper.swappable_setting("flexible_forms", "Field")
 
 
 class BaseFieldModifier(models.Model):
@@ -357,17 +347,16 @@ class BaseFieldModifier(models.Model):
     * Hiding a field until another field changes.
     """
 
-    field = models.ForeignKey(
-        swapper.get_model_name("flexible_forms", "Field"),
-        on_delete=models.CASCADE,
-        related_name="field_modifiers",
-        editable=False,
-    )
-
     attribute = models.TextField()
     expression = models.TextField()
 
-    # For custom expression validation
+    # The `field` is set by the implementing class.
+    field: models.ForeignKey
+    field_id: int
+
+    # The _validated flag is used to check whether the expression has been
+    # validated. If it's false by the time that save() is called, we validate
+    # there.
     _validated = False
 
     def __str__(self) -> str:
@@ -446,22 +435,13 @@ class BaseFieldModifier(models.Model):
             args: Passed to super.
             kwargs: Passed to super.
         """
+        # If we haven't validated the expression at this point, run clean().
         if not self._validated:
             self.clean()
         super().save(*args, **kwargs)
 
     class Meta:
         abstract = True
-
-
-class FieldModifier(BaseFieldModifier):
-    """A concrete implementation of FieldModifier."""
-
-    class Meta:
-        swappable = swapper.swappable_setting(
-            "flexible_forms",
-            "FieldModifier",
-        )
 
 
 class RecordManager(models.Manager):
@@ -479,22 +459,23 @@ class RecordManager(models.Manager):
         Returns:
             models.QuerySet['BaseRecord']: An optimized queryset of Records.
         """
-        return (
-            super()
-            .get_queryset()
-            .select_related("form")
-            .prefetch_related("form__fields", "attributes__field")
+        return cast(
+            "models.QuerySet[BaseRecord]",
+            (
+                super()
+                .get_queryset()
+                .select_related("form")
+                .prefetch_related("form__fields", "attributes__field")
+            ),
         )
 
 
 class BaseRecord(models.Model):
     """An instance of a Form."""
 
-    form = models.ForeignKey(
-        swapper.get_model_name("flexible_forms", "Form"),
-        on_delete=models.CASCADE,
-        related_name="records",
-    )
+    # The `form` is set by the implementing class.
+    form: models.ForeignKey
+    form_id: int
 
     objects = RecordManager()
 
@@ -502,11 +483,13 @@ class BaseRecord(models.Model):
         abstract = True
 
     def __str__(self) -> str:
-        return f"Record {self.pk} (form_id={self.form_id})"
+        return f"Record {self.pk} (form_id={self.form_id if self.form else None})"
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self._staged_changes: Mapping[str, Any] = {}
+    def __init__(
+        self, *args: Any, form: Optional[BaseForm] = None, **kwargs: Any
+    ) -> None:
+        super().__init__(*args, form=form, **kwargs)
+        self._staged_changes: MutableMapping[str, Any] = {}
 
     @property
     def fields(self) -> Mapping[str, BaseField]:
@@ -543,9 +526,8 @@ class BaseRecord(models.Model):
             value: The value.
             commit: True if the record should be persisted.
         """
-        RecordAttribute = swapper.load_model(
-            "flexible_forms",
-            "RecordAttribute",
+        RecordAttribute = cast(
+            Type[BaseRecordAttribute], self._meta.get_field("attributes").related_model
         )
         if commit:
             RecordAttribute.objects.update_or_create(
@@ -556,12 +538,9 @@ class BaseRecord(models.Model):
                 },
             )
         else:
-            self._staged_changes = {
-                **self._staged_changes,
-                field_name: RecordAttribute(
-                    field=self.fields[field_name], value=value
-                ).value,
-            }
+            self._staged_changes[field_name] = RecordAttribute(
+                field=self.fields[field_name], value=value
+            ).value
 
         self._invalidate_cache()
 
@@ -580,13 +559,6 @@ class BaseRecord(models.Model):
         self._invalidate_cache()
 
 
-class Record(BaseRecord):
-    """The default Record implementation."""
-
-    class Meta:
-        swappable = swapper.swappable_setting("flexible_forms", "Record")
-
-
 class BaseRecordAttribute(models.Model):
     """A value for an attribute on a single Record."""
 
@@ -600,16 +572,23 @@ class BaseRecordAttribute(models.Model):
     class Meta:
         abstract = True
 
-    record = models.ForeignKey(
-        swapper.get_model_name("flexible_forms", "Record"),
-        on_delete=models.CASCADE,
-        related_name="attributes",
-    )
-    field = models.ForeignKey(
-        swapper.get_model_name("flexible_forms", "Field"),
-        on_delete=models.CASCADE,
-        related_name="attributes",
-    )
+    # The `record` and `field` are set by the implementing class.
+    record: models.ForeignKey
+    record_id: int
+    field: models.ForeignKey
+    field_id: int
+
+    def __str__(self) -> str:
+        return f"RecordAttribute {self.pk} (record_id={self.record_id}, field_id={self.field_id})"
+
+    def __init__(
+        self,
+        *args: Any,
+        record: Optional[BaseRecord] = None,
+        field: Optional[BaseField] = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, record=record, field=field, **kwargs)
 
     @classmethod
     def get_value_field_name(cls, field_type: str) -> str:
@@ -685,11 +664,302 @@ for field_type, field in sorted(FIELD_TYPES.items(), key=lambda f: f[0]):
     )
 
 
-class RecordAttribute(BaseRecordAttribute):
-    """The default RecordAttribute implementation."""
+FlexibleFormModel = Union[
+    BaseForm,
+    BaseField,
+    BaseFieldModifier,
+    BaseRecord,
+    BaseRecordAttribute,
+]
 
-    class Meta:
-        swappable = swapper.swappable_setting(
-            "flexible_forms",
-            "RecordAttribute",
+T = TypeVar("T", bound=FlexibleFormModel)
+
+
+class FlexibleForms:
+    """A class for generating new sets of concrete flexible form models.
+
+    Enables users to have multiple sets of FlexibleForm models in their
+    application.
+
+    Effectively frees the developer from having to shoehorn all of their use
+    cases into a single set of models and tables, and allows them to
+    customize each set of models and tailor them to each specific use case.
+
+    For example, in a school setting it might be useful to have a flexible
+    model structure for Quizzes, and another one for Projects, each with
+    their own set of models, database tables, and attributes:
+
+    ```python
+    # quizzes/models.py
+    from django.contrib.auth import get_user_model
+    from django.db import models
+    from flexible_forms.models import BaseForm, BaseRecord
+    from django.utils import timezone
+
+    quizzes = FlexibleForms(model_prefix="Quiz")
+
+    @quizzes
+    class QuizAssignment(BaseForm):
+        due = models.DateTimeField(default=timezone.now)
+
+        class Meta(BaseForm.Meta):
+            ordering = ("-due",)
+
+    @quizzes
+    class QuizSubmission(BaseRecord):
+        student = models.ForeignKey(get_user_model(), on_delete=models.CASCADE)
+        submitted = models.DateTimeField(default=timezone.now)
+        grade = models.PositiveIntegerField()
+
+    quizzes.make_flexible()
+    ```
+
+    ```python
+    # projects/models.py
+    from django.db import models
+    from flexible_forms.models import BaseForm
+    from django.utils import timezone
+
+    projects = FlexibleForms(model_prefix="Project")
+
+    @projects
+    class ProjectAssignment(BaseForm):
+        due = models.DateTimeField(default=timezone.now)
+        grading_criteria = models.TextField()
+
+        class Meta(BaseForm.Meta):
+            ordering = ("-due",)
+
+    projects.make_flexible()
+    ```
+    """
+
+    finalized = False
+    model_prefix: str
+    module: str
+
+    form_model: Optional[Type[BaseForm]] = None
+    field_model: Optional[Type[BaseField]] = None
+    field_modifier_model: Optional[Type[BaseFieldModifier]] = None
+    record_model: Optional[Type[BaseRecord]] = None
+    record_attribute_model: Optional[Type[BaseRecordAttribute]] = None
+
+    def __init__(
+        self, model_prefix: Optional[str] = None, module: Optional[str] = None
+    ) -> None:
+        """Initialize a group of flexible form models.
+
+        Args:
+            model_prefix: A string that will be prepended to each default
+                model name. For example, specifying "Foo" for the model_prefix
+                will cause any auto-generated models to start with "Foo". E.g.,
+                "FooForm", "FooRecord", etc.
+            module: The __module__ attribute to use for generated model
+                classes. If left unspecified, uses `inspect` to determine the
+                module name of the caller automatically.
+        """
+        self.model_prefix = model_prefix or ""
+        self.module = (
+            module
+            or cast(ModuleType, inspect.getmodule(inspect.stack()[1][0])).__name__
         )
+        self._finalizer = weakref.finalize(self, self._check_finalized, self)
+
+    def make_flexible(self) -> None:
+        """Build the flexible models.
+
+        Adjusts the registered models so that they can be used with the
+        flexible_forms tooling.
+        """
+        self.form_model = self._make_form_model()
+        self.field_model = self._make_field_model(form_model=self.form_model)
+        self.field_modifier_model = self._make_field_modifier_model(
+            field_model=self.field_model
+        )
+        self.record_model = self._make_record_model(form_model=self.form_model)
+        self.record_attribute_model = self._make_record_attribute_model(
+            record_model=self.record_model, field_model=self.field_model
+        )
+
+        self.finalized = True
+
+    def __call__(self, model: Type[T]) -> Type[T]:
+        """Allows a FlexibleForms instance to be used as a decorator.
+
+        Assigns the wrapped model class to the appropriate slot based on its
+        type. The model must implement one of the flexible_forms base classes
+        in order to work.
+
+        Args:
+            model: The model to register.
+
+        Raises:
+            ValueError: If the given model class does not extend one of the
+                flexible_forms.models base classes.
+
+        Returns:
+            Type: The given model class.
+        """
+        if issubclass(model, BaseForm):
+            self.form_model = model
+        elif issubclass(model, BaseField):
+            self.field_model = model
+        elif issubclass(model, BaseFieldModifier):
+            self.field_modifier_model = model
+        elif issubclass(model, BaseRecord):
+            self.record_model = model
+        elif issubclass(model, BaseRecordAttribute):
+            self.record_attribute_model = model
+        else:
+            raise ValueError(
+                f"{model} must implement one of the flexible_forms.models.Base* classes."
+            )
+        return model
+
+    def _make_form_model(self) -> Type[BaseForm]:
+        """Prepare the Field model.
+
+        Returns:
+            Type[BaseForm]: The prepared Form class.
+        """
+        return self.form_model or self._default_model(BaseForm)
+
+    def _make_field_model(self, form_model: Type[BaseForm]) -> Type[BaseField]:
+        """Prepare the Field model.
+
+        Args:
+            form_model: The model to use when building the "form" foreign key association.
+
+        Returns:
+            Type[BaseField]: The prepared Field class.
+        """
+        field_model = self.field_model or self._default_model(BaseField)
+        field_model.add_to_class(  # type: ignore
+            "form",
+            models.ForeignKey(
+                form_model,
+                on_delete=models.CASCADE,
+                related_name="fields",
+                editable=False,
+            ),
+        )
+        return field_model
+
+    def _make_field_modifier_model(
+        self, field_model: Type[BaseField]
+    ) -> Type[BaseFieldModifier]:
+        """Prepare the FieldModifier model.
+
+        Args:
+            field_model: The model to use when building the "field" foreign key association.
+
+        Returns:
+            Type[BaseFieldModifier]: The prepared FieldModifier class.
+        """
+        field_modifier_model = self.field_modifier_model or self._default_model(
+            BaseFieldModifier
+        )
+        field_modifier_model.add_to_class(  # type: ignore
+            "field",
+            models.ForeignKey(
+                field_model,
+                on_delete=models.CASCADE,
+                related_name="modifiers",
+                editable=False,
+            ),
+        )
+        return field_modifier_model
+
+    def _make_record_model(self, form_model: Type[BaseForm]) -> Type[BaseRecord]:
+        """Prepare the Record model.
+
+        Args:
+            form_model: The model to use when building the "form" foreign key association.
+
+        Returns:
+            Type[BaseRecord]: The prepared Record model.
+        """
+        record_model = self.record_model or self._default_model(BaseRecord)
+        record_model.add_to_class(  # type: ignore
+            "form",
+            models.ForeignKey(
+                form_model,
+                on_delete=models.CASCADE,
+                related_name="records",
+                # editable=False,
+            ),
+        )
+        return record_model
+
+    def _make_record_attribute_model(
+        self, record_model: Type[BaseRecord], field_model: Type[BaseField]
+    ) -> Type[BaseRecordAttribute]:
+        """Build the RecordAttribute model.
+
+        Args:
+            record_model: The model to use when building the "record" foreign key association.
+            field_model: The model to use when building the "field" foreign key association.
+
+        Returns:
+            Type[BaseRecordAttribute]: The prepared BaseRecordAttribute model class.
+        """
+        record_attribute_model = self.record_attribute_model or self._default_model(
+            BaseRecordAttribute
+        )
+        record_attribute_model.add_to_class(  # type: ignore
+            "record",
+            models.ForeignKey(
+                record_model,
+                on_delete=models.CASCADE,
+                related_name="attributes",
+                editable=False,
+            ),
+        )
+        record_attribute_model.add_to_class(  # type: ignore
+            "field",
+            models.ForeignKey(
+                field_model,
+                on_delete=models.CASCADE,
+                related_name="attributes",
+                editable=False,
+            ),
+        )
+        return record_attribute_model
+
+    def _default_model(self, base_model: Type[T]) -> Type[T]:
+        """Create a default model from the given base model.
+
+        Derives the model name by removing the "Base" prefix.
+
+        Args:
+            base_model: The base model from which to derive the default model.
+
+        Returns:
+            type: A new model class derived from the base model.
+        """
+        model_name = base_model.__name__.replace("Base", self.model_prefix)
+        return type(
+            model_name,
+            (base_model,),
+            {"__module__": self.module},
+        )
+
+    @staticmethod
+    def _check_finalized(flexible_forms: "FlexibleForms") -> None:
+        """Ensure that make_flexible has been called.
+
+        Attempts to catch a developer mistake where they forget to call
+        make_flexible after defining their model overrides.
+
+        Args:
+            flexible_forms: The FlexibleForms object to be checked.
+
+        Raises:
+            ImproperlyConfigured: If make_flexible has not been called on the
+                object before exiting.
+        """
+        if not flexible_forms.finalized:
+            raise ImproperlyConfigured(
+                f"A FlexibleForms object was created in {flexible_forms.module}, but "
+                f"`make_flexible` was never called on it."
+            )

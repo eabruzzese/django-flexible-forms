@@ -2,12 +2,13 @@
 
 """Tests for form-related models."""
 
+import warnings
 from datetime import timedelta
 from typing import Sequence, cast
 
 import pytest
 from django import forms
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.files.base import File
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import models
@@ -16,7 +17,7 @@ from django.utils.datastructures import MultiValueDict
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from hypothesis.extra.django import from_form
-from test_app.models import CustomField, CustomRecord
+from test_app.models import AppField, AppRecord
 from test_app.tests.factories import FieldFactory, FormFactory
 
 from flexible_forms.fields import (
@@ -27,6 +28,14 @@ from flexible_forms.fields import (
     SingleChoiceSelectField,
     SingleLineTextField,
     YesNoRadioField,
+)
+from flexible_forms.models import (
+    BaseField,
+    BaseFieldModifier,
+    BaseForm,
+    BaseRecord,
+    BaseRecordAttribute,
+    FlexibleForms,
 )
 from flexible_forms.utils import FormEvaluator
 from tests.conftest import ContextManagerFixture
@@ -118,7 +127,7 @@ def test_field_modifier() -> None:
         field_type=SingleLineTextField.name(),
     )
 
-    modifier = field_2.field_modifiers.create(attribute="required", expression="True")
+    modifier = field_2.modifiers.create(attribute="required", expression="True")
 
     # If the modifier has no field, defer validation until save
     modifier.field = None
@@ -192,7 +201,7 @@ def test_form_lifecycle() -> None:
         field_type=MultiLineTextField.name(),
         required=True,
     )
-    quest_field.field_modifiers.create(
+    quest_field.modifiers.create(
         attribute="hidden",
         expression=f"empty({name_field.name})",
     )
@@ -212,11 +221,11 @@ def test_form_lifecycle() -> None:
         },
         required=True,
     )
-    favorite_color_field.field_modifiers.create(
+    favorite_color_field.modifiers.create(
         attribute="hidden",
         expression="empty(quest)",
     )
-    favorite_color_field.field_modifiers.create(
+    favorite_color_field.modifiers.create(
         attribute="help_text",
         expression="'Auuugh!' if favorite_color == 'yellow' else ''",
     )
@@ -303,18 +312,18 @@ def test_form_lifecycle() -> None:
     # "Saving" the form with commit=False should produce a record instance with
     # a data property that matches the cleaned form submission, but not
     # actually persist anything to the database.
-    record_count = CustomRecord.objects.count()
+    record_count = AppRecord.objects.count()
     unpersisted_record = django_form.save(commit=False)
     cleaned_record_data = django_form.cleaned_data
     del cleaned_record_data["form"]
     assert unpersisted_record.data == cleaned_record_data
-    assert CustomRecord.objects.count() == record_count
+    assert AppRecord.objects.count() == record_count
 
     # Saving the form with commit=True should produce the same result as
     # commit=False, but actually persist the changes to the database.
     persisted_record = django_form.save(commit=True)
     assert persisted_record.data == cleaned_record_data
-    assert CustomRecord.objects.count() == record_count + 1
+    assert AppRecord.objects.count() == record_count + 1
 
     # Recreating the form should produce a valid, unchanged form. Calling
     # save() on the form should noop.
@@ -399,7 +408,7 @@ def test_noop_modifier_attribute() -> None:
         field_type=YesNoRadioField.name(),
         required=True,
     )
-    modifier = field.field_modifiers.create(
+    modifier = field.modifiers.create(
         attribute="noop_modifier",
         expression=f"empty({field.name})",
     )
@@ -429,7 +438,7 @@ def test_record(
     form = FormFactory(label="Kitchen Sink")
 
     # Bulk create fields (one per supported field type).
-    CustomField.objects.bulk_create(
+    AppField.objects.bulk_create(
         FieldFactory.build(
             form=form,
             name=f"{field_type}_field",
@@ -440,7 +449,7 @@ def test_record(
         for field_type in FIELD_TYPES.keys()
     )
 
-    fields: Sequence[CustomField] = ()
+    fields: Sequence[AppField] = ()
     for field_type in FIELD_TYPES.keys():
         field = FieldFactory.build(
             form=form,
@@ -477,13 +486,16 @@ def test_record(
 
         # Assert that saving the Django form results in a Record instance.
         record = django_form_instance.save()
-        assert isinstance(record, CustomRecord)
+        assert isinstance(record, AppRecord)
 
-        # Ensure form record has a friendly string representation
+        # Ensure form records and their attributes have a friendly string representation.
         assert str(record) == f"Record {record.pk} (form_id={record.form_id})"
 
-        # Re-fetch the record so that we can test prefetching.
-        record = CustomRecord.objects.get(pk=record.pk)
+        sample_attribute = record.attributes.first()
+        assert (
+            str(sample_attribute)
+            == f"RecordAttribute {sample_attribute.pk} (record_id={sample_attribute.record_id}, field_id={sample_attribute.field_id})"
+        )
 
         # Assert that each field value can be retrieved from the database and
         # that it matches the value in the form's cleaned_data construct.
@@ -497,3 +509,94 @@ def test_record(
                 assert record_value.size == cleaned_value.size
             else:
                 assert record_value == cleaned_value
+
+
+def test_flexible_forms(mocker) -> None:
+    """Ensure that the FlexibleForms construct behaves as expected."""
+    test_ff = FlexibleForms(model_prefix="Test")
+
+    # All of the model slots should start out empty.
+    assert test_ff.form_model is None
+    assert test_ff.field_model is None
+    assert test_ff.field_modifier_model is None
+    assert test_ff.record_model is None
+    assert test_ff.record_attribute_model is None
+
+    # Models should be able to be decorated to have them assigned to an
+    # appropriate slot based on the flexible_forms base model they inherit
+    # from.
+    @test_ff
+    class TestForm(BaseForm):
+        pass
+
+    assert test_ff.form_model is TestForm
+
+    @test_ff
+    class TestField(BaseField):
+        pass
+
+    assert test_ff.field_model is TestField
+
+    @test_ff
+    class TestFieldModifier(BaseFieldModifier):
+        pass
+
+    assert test_ff.field_modifier_model is TestFieldModifier
+
+    @test_ff
+    class TestRecord(BaseRecord):
+        pass
+
+    assert test_ff.record_model is TestRecord
+
+    @test_ff
+    class TestRecordAttribute(BaseRecordAttribute):
+        pass
+
+    assert test_ff.record_attribute_model is TestRecordAttribute
+
+    # An error should be raised if the decorator is used on a class that
+    # doesn't inherit from a flexible_forms base model.
+    with pytest.raises(ValueError) as ex:
+
+        @test_ff
+        class BrokenModel:
+            pass
+
+    assert "BrokenModel" in str(ex)
+    assert "must implement one of" in str(ex)
+    assert "flexible_forms.models.Base" in str(ex)
+
+    # Leaving a slot empty should result in a model being automatically
+    # generated from the appropriate base class.
+    test_ff.finalized = False
+    test_ff.form_model = None
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore", message=r"Model [^\s]+ was already registered"
+        )
+        test_ff.make_flexible()
+    assert test_ff.form_model is not None
+
+    # A finalizer should be registered and called when the FlexibleForms object
+    # is garbage collected and raise an ImproperlyConfigured error if the user
+    # has not called make_flexible().
+    #
+    # The error message should include the model's module and a mention of the
+    # make_flexible call that's missing.
+    with pytest.raises(ImproperlyConfigured) as ex:
+        test_ff.finalized = False
+        test_ff._check_finalized(test_ff)
+    assert test_ff.module in str(ex)
+    assert "make_flexible" in str(ex)
+
+    # The finalizer should not be called if the user has called make_flexible
+    # on their FlexibleForms object.
+    test_ff.make_flexible()
+    test_ff._check_finalized(test_ff)
+
+    # The finalizer should be called whenever the FlexibleForms object gets
+    # garbage collected or destroyed.
+    finalizer = mocker.patch.object(test_ff, "_check_finalized")
+    del test_ff
+    assert finalizer.called_once()

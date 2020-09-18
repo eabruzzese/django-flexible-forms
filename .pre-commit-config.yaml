@@ -25,6 +25,8 @@ repos:
             tests/manage\.py|
             tests/test_project/*|
             tests/test_app/[^\/]+.py|
+            tests/test_app/management/[^\/]+.py|
+            tests/test_app/management/commands/[^\/]+.py|
             tests/test_app/tests/factories\.py
           )
       - id: no-commit-to-branch
@@ -65,7 +67,6 @@ repos:
     rev: v2.2.0
     hooks:
       - id: seed-isort-config
-        args: ["--settings-path", "services/api/"]
   - repo: https://github.com/timothycrosley/isort
     rev: 5.5.2
     hooks:

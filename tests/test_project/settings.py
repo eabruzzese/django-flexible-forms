@@ -127,11 +127,3 @@ STATIC_URL = "/static/"
 # https://docs.djangoproject.com/en/3.0/howto/static-files/#serving-files-uploaded-by-a-user-during-development
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
-
-
-# Swappable model overrides for flexible_forms
-FLEXIBLE_FORMS_FORM_MODEL = "test_app.CustomForm"
-FLEXIBLE_FORMS_FIELD_MODEL = "test_app.CustomField"
-FLEXIBLE_FORMS_RECORD_MODEL = "test_app.CustomRecord"
-FLEXIBLE_FORMS_RECORDATTRIBUTE_MODEL = "test_app.CustomRecordAttribute"
-FLEXIBLE_FORMS_FIELDMODIFIER_MODEL = "test_app.CustomFieldModifier"

@@ -13,7 +13,7 @@ class FieldFactory(factory.django.DjangoModelFactory):
     """A factory for generating form Field records."""
 
     class Meta:
-        model = "test_app.CustomField"
+        model = "test_app.AppField"
 
     form = factory.SubFactory("test_app.tests.factories.FormFactory")
     field_type = factory.LazyAttribute(
@@ -27,6 +27,6 @@ class FormFactory(factory.django.DjangoModelFactory):
     """A factory for generating Form records."""
 
     class Meta:
-        model = "test_app.CustomForm"
+        model = "test_app.AppForm"
 
     label = factory.Faker("sentence")

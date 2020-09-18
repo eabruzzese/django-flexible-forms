@@ -105,7 +105,7 @@ class FlexibleField:
     @classmethod
     def as_form_field(
         cls,
-        field_modifiers: Sequence[Tuple[str, str]] = (),
+        modifiers: Sequence[Tuple[str, str]] = (),
         field_values: Optional[Mapping[str, Optional[Any]]] = None,
         form_widget_options: Optional[Mapping[str, Optional[Any]]] = None,
         **kwargs: Any,
@@ -115,7 +115,7 @@ class FlexibleField:
         Receives a dict of kwargs to pass through to the form field constructor.
 
         Args:
-            field_modifiers: A sequence of modifiers to
+            modifiers: A sequence of modifiers to
                 be applied to the field.
             field_values: A mapping of the
                 current form values.
@@ -148,7 +148,7 @@ class FlexibleField:
         # Apply any modifiers to the field.
         form_field = cls.apply_modifiers(
             form_field=form_field,
-            field_modifiers=field_modifiers,
+            modifiers=modifiers,
             field_values=field_values,
         )
 
@@ -183,14 +183,14 @@ class FlexibleField:
     def apply_modifiers(
         cls,
         form_field: form_fields.Field,
-        field_modifiers: Sequence[Tuple[str, str]] = (),
+        modifiers: Sequence[Tuple[str, str]] = (),
         field_values: Optional[Mapping[str, Any]] = None,
     ) -> form_fields.Field:
         """Apply the given modifiers to the given Django form field.
 
         Args:
             form_field: The form field to be modified.
-            field_modifiers: A sequence of tuples
+            modifiers: A sequence of tuples
                 in the form of (attribute, expression) tuples to apply to the
                 field.
             field_values: The current values of
@@ -199,7 +199,7 @@ class FlexibleField:
         Returns:
             form_fields.Field: The given form field, modified using the modifiers.
         """
-        for attribute, expression in field_modifiers:
+        for attribute, expression in modifiers:
             # Evaluate the expression and set the attribute specified by
             # `self.attribute` to the value it returns.
             try:
