@@ -67,7 +67,7 @@ jobs:
       # Run the test suite.
       - name: Run pytest
         shell: bash
-        run: poetry run python -m pytest -v tests/
+        run: poetry run python -m pytest --create-db -v tests/
 
       # Report metrics to codecov.
       - name: Report code coverage
