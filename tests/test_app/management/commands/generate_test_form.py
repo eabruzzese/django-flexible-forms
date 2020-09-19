@@ -32,7 +32,7 @@ class Command(BaseCommand):
             options: Parsed arguments to the command.
         """
         Form = apps.get_model(*options["model"].split("."))
-        form = Form.objects.create(label=options["label"])
+        form = Form._default_manager.create(label=options["label"])
 
         # Create a field in the form for every defined field type.
         for field_type in FIELD_TYPES.keys():

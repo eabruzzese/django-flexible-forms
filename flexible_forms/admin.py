@@ -3,17 +3,23 @@
 """Django admin configurations for flexible_forms."""
 
 import logging
-from typing import Any, Optional, Type, cast
+from typing import Any, Iterable, Optional, Type, cast
 
 from django import forms
 from django.conf import settings
 from django.contrib import admin
+from django.contrib.admin.options import InlineModelAdmin
 from django.db import models
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.urls import reverse
 from django.utils.safestring import SafeText, mark_safe
 
-from flexible_forms.models import BaseField, BaseFieldModifier
+from flexible_forms.models import (
+    BaseField,
+    BaseFieldModifier,
+    BaseForm,
+    BaseRecord,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +37,6 @@ else:  # pragma: no cover
     ModelAdmin = admin.ModelAdmin
     StackedInline = admin.StackedInline
     TabularInline = admin.TabularInline
-
-
-from flexible_forms.models import BaseForm, BaseRecord
 
 
 class FieldModifiersInline(TabularInline):
@@ -73,7 +76,26 @@ class FieldsInline(StackedInline):
         },
     }
 
-    inlines = (FieldModifiersInline,)
+    @property
+    def inlines(self) -> Iterable[InlineModelAdmin]:
+        """Return valid inlines for the given BaseField implementation.
+
+        Returns:
+            Iterable[InlineModelAdmin]: An iterable of InlineModelAdmin classes.
+        """
+        return (
+            *super().inlines,
+            cast(
+                FieldModifiersInline,
+                type(
+                    "FieldModifiersInline",
+                    (FieldModifiersInline,),
+                    {
+                        "model": self.model._flexible_model_for(BaseFieldModifier),
+                    },
+                ),
+            ),
+        )
 
 
 class FormsAdmin(ModelAdmin):
@@ -94,35 +116,24 @@ class FormsAdmin(ModelAdmin):
 
     list_display = ("label", "_fields_count", "_records_count", "_add_record")
 
-    inlines = (FieldsInline,)
-
-    @classmethod
-    def for_model(cls, form_model: Type[BaseForm]) -> Type["FormsAdmin"]:
-        """Generate a FormsAdmin class for the given model.
-
-        Args:
-            form_model: The form model for which to generate a FormsAdmin class.
+    @property
+    def inlines(self) -> Iterable[InlineModelAdmin]:
+        """Return valid inlines for the given BaseForm implementation.
 
         Returns:
-            Type[FormsAdmin]: A FormsAdmin class, configured to work with the
-                given model.
+            Iterable[InlineModelAdmin]: An iterable of InlineModelAdmin classes.
         """
-        form_model_name = form_model.__name__
-
-        field_model = form_model._meta.get_field("fields").related_model
-        field_modifier_model = field_model._meta.get_field("modifiers").related_model
-        field_modifier_inline = type(
-            f"{form_model_name}FieldModifierInline",
-            (FieldModifiersInline,),
-            {"model": field_modifier_model},
+        return (
+            *super().inlines,
+            cast(
+                FieldsInline,
+                type(
+                    "FieldsInline",
+                    (FieldsInline,),
+                    {"model": self.model._flexible_model_for(BaseField)},
+                ),
+            ),
         )
-        fields_inline = type(
-            f"{form_model_name}FieldsInline",
-            (FieldsInline,),
-            {"model": field_model, "inlines": (field_modifier_inline,)},
-        )
-
-        return type(f"{form_model_name}Admin", (cls,), {"inlines": (fields_inline,)})
 
     def get_queryset(self, *args: Any, **kwargs: Any) -> "models.QuerySet[BaseForm]":
         """Overrides the default queryset to optimize fetches.
@@ -184,7 +195,7 @@ class FormsAdmin(ModelAdmin):
     _records_count.admin_order_field = "records__count"  # type: ignore
 
     def _add_record(self, form: "BaseForm") -> SafeText:
-        Record = self.model._meta.get_field("records").related_model
+        Record = form._flexible_model_for(BaseRecord)
         app_label = Record._meta.app_label  # noqa: WPS437
         model_name = Record._meta.model_name  # noqa: WPS437
 
@@ -205,6 +216,9 @@ class RecordsAdmin(admin.ModelAdmin):
 
     class Meta:
         pass
+
+    # Type hints.
+    model: Type[BaseRecord]
 
     def get_queryset(
         self,
@@ -284,13 +298,12 @@ class RecordsAdmin(admin.ModelAdmin):
         Returns:
             HttpResponse: The HTTP response with the rendered view.
         """
-        record = None
         form_id = request.GET.get("form_id")
-        Form = self.model._meta.get_field("form").remote_field.model
+        Form = self.model._flexible_model_for(BaseForm)
 
         if form_id:
             record = self.model._default_manager.create(
-                form=Form.objects.get(pk=form_id),
+                form=Form._default_manager.get(pk=form_id),
             )
 
             app_label = record._meta.app_label  # noqa: WPS437

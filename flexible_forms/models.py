@@ -22,6 +22,7 @@ from django import forms
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
+from django.db.models.fields.reverse_related import ManyToOneRel
 from django.forms.fields import FileField
 from django.utils.datastructures import MultiValueDict
 from django.utils.functional import cached_property
@@ -36,13 +37,25 @@ try:
 except ImportError:  # pragma: no cover
     from django.contrib.postgres.fields import JSONField
 
+logger = logging.getLogger(__name__)
+
 # If we're only type checking, import things that would otherwise cause an
 # ImportError due to circular dependencies.
 if TYPE_CHECKING:  # pragma: no cover
     from flexible_forms.forms import BaseRecordForm
 
-logger = logging.getLogger(__name__)
+FlexibleModel = Union[
+    "BaseForm",
+    "BaseField",
+    "BaseFieldModifier",
+    "BaseRecord",
+    "BaseRecordAttribute",
+]
 
+T = TypeVar(
+    "T",
+    bound=FlexibleModel,
+)
 
 ##
 # FIELD_TYPE_OPTIONS
@@ -56,7 +69,30 @@ FIELD_TYPE_OPTIONS = sorted(
 )
 
 
-class BaseForm(models.Model):
+class FlexibleBaseModel(models.Model):
+    """A common base for all FlexibleField base models."""
+
+    class Meta:
+        abstract = True
+
+    # A mapping of base model class to its implementation.
+    _flexible_models: Mapping[Any, Any] = {}
+
+    @classmethod
+    def _flexible_model_for(cls, base_model: Type[T]) -> Type[T]:
+        """Return the current implementation of the given base_model.
+
+        Args:
+            base_model: The flexible_forms base model for which to return the implementation.
+
+        Returns:
+            Type[FleixbleModel]: The model class for the given base model in
+                the current implementation.
+        """
+        return cast(Type[T], cls._flexible_models[base_model])
+
+
+class BaseForm(FlexibleBaseModel):
     """A model representing a single type of customizable form."""
 
     name = models.TextField(
@@ -72,6 +108,10 @@ class BaseForm(models.Model):
         help_text="The human-friendly name of the form.",
     )
     description = models.TextField(blank=True, default="")
+
+    # Type hints for inbound relationships.
+    fields: ManyToOneRel
+    records: ManyToOneRel
 
     class Meta:
         abstract = True
@@ -125,7 +165,8 @@ class BaseForm(models.Model):
         if isinstance(initial, MultiValueDict):
             initial = initial.dict()
 
-        Record = cast(Type[BaseRecord], self._meta.get_field("records").related_model)
+        # Derive the Record model from the relationship field.
+        Record = self._flexible_model_for(BaseRecord)
 
         instance = instance or Record(form=self)  # type: ignore
         data = cast(Mapping[str, Any], {**(data or instance.data), "form": self.pk})
@@ -183,7 +224,7 @@ class BaseForm(models.Model):
         return form_instance
 
 
-class BaseField(models.Model):
+class BaseField(FlexibleBaseModel):
     """A field on a form.
 
     A field belonging to a Form. Attempts to emulate a subset of
@@ -315,7 +356,7 @@ class BaseField(models.Model):
         )
 
 
-class BaseFieldModifier(models.Model):
+class BaseFieldModifier(FlexibleBaseModel):
     """A dynamic expression for customizing field rendering behavior.
 
     A FieldModifier is essentially a map of `attribute` -> `expression`,
@@ -470,7 +511,7 @@ class RecordManager(models.Manager):
         )
 
 
-class BaseRecord(models.Model):
+class BaseRecord(FlexibleBaseModel):
     """An instance of a Form."""
 
     # The `form` is set by the implementing class.
@@ -526,11 +567,9 @@ class BaseRecord(models.Model):
             value: The value.
             commit: True if the record should be persisted.
         """
-        RecordAttribute = cast(
-            Type[BaseRecordAttribute], self._meta.get_field("attributes").related_model
-        )
+        RecordAttribute = self._flexible_model_for(BaseRecordAttribute)
         if commit:
-            RecordAttribute.objects.update_or_create(
+            RecordAttribute._default_manager.update_or_create(
                 record=self,
                 field=self.fields[field_name],
                 defaults={
@@ -559,7 +598,7 @@ class BaseRecord(models.Model):
         self._invalidate_cache()
 
 
-class BaseRecordAttribute(models.Model):
+class BaseRecordAttribute(FlexibleBaseModel):
     """A value for an attribute on a single Record."""
 
     ##
@@ -662,17 +701,6 @@ for field_type, field in sorted(FIELD_TYPES.items(), key=lambda f: f[0]):
         BaseRecordAttribute.get_value_field_name(field_type),
         field.as_model_field(blank=True, null=True, default=None),
     )
-
-
-FlexibleFormModel = Union[
-    BaseForm,
-    BaseField,
-    BaseFieldModifier,
-    BaseRecord,
-    BaseRecordAttribute,
-]
-
-T = TypeVar("T", bound=FlexibleFormModel)
 
 
 class FlexibleForms:
@@ -781,6 +809,20 @@ class FlexibleForms:
             record_model=self.record_model, field_model=self.field_model
         )
 
+        # Generate a map of base models to their implementations and copy it to
+        # each flexible model. This makes it easier to get the model(s) we need
+        # for business logic.
+        model_map = {
+            BaseForm: self.form_model,
+            BaseField: self.field_model,
+            BaseFieldModifier: self.field_modifier_model,
+            BaseRecord: self.record_model,
+            BaseRecordAttribute: self.record_attribute_model,
+        }
+
+        for model_class in model_map.values():
+            model_class._flexible_models = model_map
+
         self.finalized = True
 
     def __call__(self, model: Type[T]) -> Type[T]:
@@ -886,7 +928,6 @@ class FlexibleForms:
                 form_model,
                 on_delete=models.CASCADE,
                 related_name="records",
-                # editable=False,
             ),
         )
         return record_model

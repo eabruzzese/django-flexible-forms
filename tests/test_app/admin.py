@@ -9,7 +9,7 @@ class AppFormsAdmin(FormsAdmin):
     """An admin class for managing AppForm objects."""
 
 
-admin.site.register(AppForm, AppFormsAdmin.for_model(AppForm))
+admin.site.register(AppForm, AppFormsAdmin)
 
 
 class AppRecordsAdmin(RecordsAdmin):

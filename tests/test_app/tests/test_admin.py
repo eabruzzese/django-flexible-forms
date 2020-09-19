@@ -10,6 +10,8 @@ from django.template.response import TemplateResponse
 from test_app.admin import AppFormsAdmin, AppRecordsAdmin
 from test_app.models import AppForm, AppRecord
 
+from flexible_forms.admin import FieldModifiersInline, FieldsInline
+
 from .factories import FieldFactory, FormFactory
 
 
@@ -38,6 +40,22 @@ def test_form_admin(django_assert_num_queries: Any) -> None:
         assert forms_admin._fields_count(form) == 1
         assert ">0<" in forms_admin._records_count(form)
         assert f"?form_id={form.pk}" in forms_admin._add_record(form)
+
+    # The forms admin should have an inline for fields.
+    fields_inline = next(
+        (i for i in forms_admin.inlines if issubclass(i, FieldsInline)), None
+    )
+    assert fields_inline is not None
+
+    # The fields inline should have an inline for field modifiers. The
+    # fields_inline needs to be instantiated before we can access its `inlines`
+    # property.
+    fields_inline = fields_inline(forms_admin.model, forms_admin.admin_site)
+    field_modifiers_inline = next(
+        (i for i in fields_inline.inlines if issubclass(i, FieldModifiersInline)),
+        None,
+    )
+    assert field_modifiers_inline is not None
 
 
 @pytest.mark.django_db
