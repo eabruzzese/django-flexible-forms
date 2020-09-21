@@ -184,7 +184,7 @@ class FormsAdmin(ModelAdmin):
         model_name = Record._meta.model_name  # noqa: WPS437
 
         changelist_url = reverse(f"admin:{app_label}_{model_name}_changelist")
-        filtered_changelist_url = f"{changelist_url}?form_id={form.pk}"
+        filtered_changelist_url = f"{changelist_url}?_form_id={form.pk}"
         record_count = form.records__count  # type: ignore
 
         return mark_safe(
@@ -203,7 +203,7 @@ class FormsAdmin(ModelAdmin):
             reverse(
                 f"admin:{app_label}_{model_name}_add",
             )
-            + f"?form_id={form.pk}"
+            + f"?_form_id={form.pk}"
         )
 
         return mark_safe(
@@ -237,8 +237,8 @@ class RecordsAdmin(admin.ModelAdmin):
         return (
             super()
             .get_queryset(*args, **kwargs)
-            .select_related("form")
-            .prefetch_related("form__fields__modifiers", "attributes__field")
+            .select_related("_form")
+            .prefetch_related("_form__fields__modifiers", "_attributes__field")
         )
 
     def get_form(
@@ -262,17 +262,12 @@ class RecordsAdmin(admin.ModelAdmin):
             forms.Form: The form object to be rendered.
         """
         if obj:
-            return (
-                cast(
-                    "BaseForm",
-                    obj.form,
-                )
-                .as_django_form(
+            return type(
+                obj._form.as_django_form(
                     request.POST,
                     request.FILES,
                     instance=obj,
                 )
-                .__class__
             )
 
         return cast(
@@ -298,12 +293,12 @@ class RecordsAdmin(admin.ModelAdmin):
         Returns:
             HttpResponse: The HTTP response with the rendered view.
         """
-        form_id = request.GET.get("form_id")
+        form_id = request.GET.get("_form_id")
         Form = self.model._flexible_model_for(BaseForm)
 
         if form_id:
             record = self.model._default_manager.create(
-                form=Form._default_manager.get(pk=form_id),
+                _form=Form._default_manager.get(pk=form_id),
             )
 
             app_label = record._meta.app_label  # noqa: WPS437
