@@ -114,8 +114,8 @@ class BaseForm(FlexibleBaseModel):
     description = models.TextField(blank=True, default="")
 
     # Type hints for inbound relationships.
-    fields: BaseManager["BaseField"]
-    records: BaseManager["BaseRecord"]
+    fields: "BaseManager[BaseField]"
+    records: "BaseManager[BaseRecord]"
 
     class Meta:
         abstract = True
@@ -547,7 +547,7 @@ class BaseRecord(FlexibleBaseModel):
     # The `_form` is set by the implementing class.
     _form: BaseForm
     _form_id: int
-    _attributes: BaseManager["BaseRecordAttribute"]
+    _attributes: "BaseManager[BaseRecordAttribute]"
 
     objects = RecordManager()
 
