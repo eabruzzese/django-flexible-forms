@@ -195,6 +195,18 @@ bcrypt = ["bcrypt"]
 
 [[package]]
 category = "dev"
+description = "A configurable set of panels that display various debug information about the current request/response."
+name = "django-debug-toolbar"
+optional = false
+python-versions = ">=3.5"
+version = "3.0"
+
+[package.dependencies]
+Django = ">=2.2"
+sqlparse = ">=0.2.0"
+
+[[package]]
+category = "dev"
 description = "Django admin classes that allow for nested inlines"
 name = "django-nested-admin"
 optional = false
@@ -343,7 +355,7 @@ description = "A Python utility / library to sort Python imports."
 name = "isort"
 optional = false
 python-versions = ">=3.6,<4.0"
-version = "5.5.2"
+version = "5.5.3"
 
 [package.extras]
 colors = ["colorama (>=0.4.3,<0.5.0)"]
@@ -498,7 +510,7 @@ description = "Pygments is a syntax highlighting package written in Python."
 name = "pygments"
 optional = false
 python-versions = ">=3.5"
-version = "2.7.0"
+version = "2.7.1"
 
 [[package]]
 category = "dev"
@@ -918,7 +930,7 @@ docs = ["sphinx", "jaraco.packaging (>=3.2)", "rst.linker (>=1.9)"]
 testing = ["jaraco.itertools", "func-timeout"]
 
 [metadata]
-content-hash = "038210d078c00c2f156cc11b09a037717cb97eb64e37a8dcf473bb2290dd9945"
+content-hash = "58a3e41fc5d18d41c2008831c32d511a22c72b062a80c30e5f040806e8ed8ec9"
 lock-version = "1.0"
 python-versions = "^3.6"
 
@@ -1022,6 +1034,10 @@ django = [
     {file = "Django-3.1.1-py3-none-any.whl", hash = "sha256:b5fbb818e751f660fa2d576d9f40c34a4c615c8b48dd383f5216e609f383371f"},
     {file = "Django-3.1.1.tar.gz", hash = "sha256:59c8125ca873ed3bdae9c12b146fbbd6ed8d0f743e4cf5f5817af50c51f1fc2f"},
 ]
+django-debug-toolbar = [
+    {file = "django-debug-toolbar-3.0.tar.gz", hash = "sha256:23129b4f771605c7ccf8733cc53558a68c5d463d60cdc83408d34b713acf4f5f"},
+    {file = "django_debug_toolbar-3.0-py3-none-any.whl", hash = "sha256:7c9bf93eabb1e745fe1fca830242d49f3c839d35163e5b53914009ed111209b1"},
+]
 django-nested-admin = [
     {file = "django-nested-admin-3.3.2.tar.gz", hash = "sha256:7ec58af67107e6d7b2d0fd4fe03629eff8f7957c4aef5033c4700da1bd2d7870"},
     {file = "django_nested_admin-3.3.2-py2.py3-none-any.whl", hash = "sha256:2e6706050057f5dc5664bc90d034d4ed9e3ae032ead6b063da9982c9e45ab7f3"},
@@ -1065,8 +1081,8 @@ iniconfig = [
     {file = "iniconfig-1.0.1.tar.gz", hash = "sha256:e5f92f89355a67de0595932a6c6c02ab4afddc6fcdc0bfc5becd0d60884d3f69"},
 ]
 isort = [
-    {file = "isort-5.5.2-py3-none-any.whl", hash = "sha256:ba91218eee31f1e300ecc079ef0c524cea3fc41bfbb979cbdf5fd3a889e3cfed"},
-    {file = "isort-5.5.2.tar.gz", hash = "sha256:171c5f365791073426b5ed3a156c2081a47f88c329161fd28228ff2da4c97ddb"},
+    {file = "isort-5.5.3-py3-none-any.whl", hash = "sha256:c16eaa7432a1c004c585d79b12ad080c6c421dd18fe27982ca11f95e6898e432"},
+    {file = "isort-5.5.3.tar.gz", hash = "sha256:6187a9f1ce8784cbc6d1b88790a43e6083a6302f03e9ae482acc0f232a98c843"},
 ]
 jinja2 = [
     {file = "Jinja2-2.11.2-py2.py3-none-any.whl", hash = "sha256:f0a4641d3cf955324a89c04f3d94663aa4d638abe8f733ecd3582848e1c37035"},
@@ -1241,8 +1257,8 @@ pydocstyle = [
     {file = "pydocstyle-5.1.1.tar.gz", hash = "sha256:19b86fa8617ed916776a11cd8bc0197e5b9856d5433b777f51a3defe13075325"},
 ]
 pygments = [
-    {file = "Pygments-2.7.0-py3-none-any.whl", hash = "sha256:2df50d16b45b977217e02cba6c8422aaddb859f3d0570a88e09b00eafae89c6e"},
-    {file = "Pygments-2.7.0.tar.gz", hash = "sha256:2594e8fdb06fef91552f86f4fd3a244d148ab24b66042036e64f29a291515048"},
+    {file = "Pygments-2.7.1-py3-none-any.whl", hash = "sha256:307543fe65c0947b126e83dd5a61bd8acbd84abec11f43caebaf5534cbc17998"},
+    {file = "Pygments-2.7.1.tar.gz", hash = "sha256:926c3f319eda178d1bd90851e4317e6d8cdb5e292a3386aac9bd75eca29cf9c7"},
 ]
 pyparsing = [
     {file = "pyparsing-2.4.7-py2.py3-none-any.whl", hash = "sha256:ef9d7589ef3c200abe66653d3f1ab1033c3c419ae9b9bdb1240a85b024efc88b"},

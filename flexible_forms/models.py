@@ -9,9 +9,12 @@ from types import ModuleType
 from typing import (
     TYPE_CHECKING,
     Any,
+    Dict,
+    List,
     Mapping,
     MutableMapping,
     Optional,
+    Set,
     Type,
     TypeVar,
     Union,
@@ -21,8 +24,9 @@ from typing import (
 from django import forms
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
-from django.db import models
-from django.db.models.fields.reverse_related import ManyToOneRel
+from django.db import models, transaction
+from django.db.models.manager import BaseManager
+from django.db.models.query import Prefetch
 from django.forms.fields import FileField
 from django.utils.datastructures import MultiValueDict
 from django.utils.functional import cached_property
@@ -110,8 +114,8 @@ class BaseForm(FlexibleBaseModel):
     description = models.TextField(blank=True, default="")
 
     # Type hints for inbound relationships.
-    fields: ManyToOneRel
-    records: ManyToOneRel
+    fields: BaseManager["BaseField"]
+    records: BaseManager["BaseRecord"]
 
     class Meta:
         abstract = True
@@ -168,16 +172,16 @@ class BaseForm(FlexibleBaseModel):
         # Derive the Record model from the relationship field.
         Record = self._flexible_model_for(BaseRecord)
 
-        instance = instance or Record(form=self)  # type: ignore
-        data = cast(Mapping[str, Any], {**(data or instance.data), "form": self.pk})
+        instance = instance or Record(_form=self)  # type: ignore
+        data = cast(Mapping[str, Any], {**(data or instance._data), "_form": self.pk})
         files = cast(Mapping[str, Any], files or {})
-        initial = cast(Mapping[str, Any], {**(initial or {}), "form": self.pk})
+        initial = cast(Mapping[str, Any], {**(initial or {}), "_form": self.pk})
 
         class_name = self.name.title().replace("_", "")
         form_class_name = f"{class_name}Form"
-        all_fields = self.fields.all()  # type: ignore
+        all_fields = self.fields.all()
         field_values = {
-            **instance.data,
+            **instance._data,
             **({k: data.get(k) for k in data.keys()}),
             **({k: files.get(k) for k in files.keys()}),
         }
@@ -191,6 +195,11 @@ class BaseForm(FlexibleBaseModel):
             field_value = field_values.get(field_name)
             if isinstance(form_field, FileField) and field_value is False:
                 field_value = None
+            # HACK: If the widget allows for multiple selections, make sure the
+            # value is a list. This method should be refactored to use
+            # MultiValueDict structures instead.
+            if getattr(form_field.widget, "allow_multiple_selected", False):
+                field_value = [field_value]
             field_values[field_name] = form_field.to_python(field_value)
 
         # Regenerate the form fields, this time taking the field values into
@@ -492,6 +501,8 @@ class RecordManager(models.Manager):
     relationships.
     """
 
+    model: Type["BaseRecord"]
+
     def get_queryset(self) -> "models.QuerySet[BaseRecord]":
         """Define the default QuerySet for fetching Records.
 
@@ -500,101 +511,206 @@ class RecordManager(models.Manager):
         Returns:
             models.QuerySet['BaseRecord']: An optimized queryset of Records.
         """
+        RecordAttribute = self.model._flexible_model_for(BaseRecordAttribute)
         return cast(
             "models.QuerySet[BaseRecord]",
             (
                 super()
                 .get_queryset()
-                .select_related("form")
-                .prefetch_related("form__fields", "attributes__field")
+                .select_related("_form")
+                .prefetch_related(
+                    "_form__fields",
+                    Prefetch(
+                        "_attributes",
+                        queryset=RecordAttribute.objects.select_related("field"),
+                    ),
+                )
             ),
         )
 
 
 class BaseRecord(FlexibleBaseModel):
-    """An instance of a Form."""
+    """An instance of a Form.
 
-    # The `form` is set by the implementing class.
-    form: models.ForeignKey
-    form_id: int
+    The BaseRecord is a bit special. The underlying storage implementation is
+    an EAV, but BaseRecord allows callers to access attributes with the usual
+    attribute syntax (e.g. record.attribute_name) by overriding __getattr__
+    and __setattr__ in order to proxy requests for attributes to the
+    underlying BaseRecordAttribute instance(s).
+
+    You might notice that most of the attributes on the BaseRecord are
+    prefixed with underscores. This is not necessarily to mark those
+    attributes as private, but instead to avoid collisions with EAV attribute
+    names.
+    """
+
+    # The `_form` is set by the implementing class.
+    _form: BaseForm
+    _form_id: int
+    _attributes: BaseManager["BaseRecordAttribute"]
 
     objects = RecordManager()
+
+    # The _initialized flag is used to determine if the model instance has been
+    # fully initialized by Django. We use the flag to determine if it's safe to
+    # start proxying __getattr__ and __setattr__ calls to our _attributes
+    # association (which breaks if the instanec is not fully initialized).
+    _initialized: bool = False
+
+    # The __setattr__ proxy stores attribute updates in the _staged_changes
+    # dict until save() is called. This attempts to mirror the way vanilla
+    # Django models work.
+    _staged_changes: MutableMapping[str, Any]
 
     class Meta:
         abstract = True
 
     def __str__(self) -> str:
-        return f"Record {self.pk} (form_id={self.form_id if self.form else None})"
+        return f"Record {self.pk} (_form_id={self._form_id if self._form else None})"
 
     def __init__(
-        self, *args: Any, form: Optional[BaseForm] = None, **kwargs: Any
+        self, *args: Any, _form: Optional[BaseForm] = None, **kwargs: Any
     ) -> None:
-        super().__init__(*args, form=form, **kwargs)
-        self._staged_changes: MutableMapping[str, Any] = {}
+        super().__init__(*args, _form=_form, **kwargs)
+        self._staged_changes = {}
+        self._initialized = True
 
     @property
-    def fields(self) -> Mapping[str, BaseField]:
+    def _fields(self) -> Mapping[str, BaseField]:
         """Return a map of Fields for the Record's form, keyed by their names.
 
         Returns:
             Mapping[str, BaseField]: A mapping of Field instances by their
                 names.
         """
-        return {f.name: f for f in self.form.fields.all()}
+        return {f.name: f for f in self._form.fields.all()}
 
     @cached_property
-    def data(self) -> Mapping[str, Any]:
+    def _data(self) -> Mapping[str, Any]:
         """Return a dict of Record attributes and their values.
 
         Returns:
             Mapping[str, Any]: A dict of Record attributes and their values.
         """
-        return {
-            **{name: field.initial for name, field in self.fields.items()},
-            **(
-                {a.field.name: a.value for a in self.attributes.all()}  # type: ignore
+        initial_values = {name: field.initial for name, field in self._fields.items()}
+        attribute_values = cast(
+            Dict[str, Any],
+            (
+                {a.field.name: a.value for a in self._attributes.all()}
                 if self.pk
                 else {}
             ),
-            **self._staged_changes,
+        )
+        staged_attributes = {k: v for k, v in self._staged_changes.items()}
+
+        return {
+            **initial_values,
+            **attribute_values,
+            **staged_attributes,
         }
 
-    def set_attribute(self, field_name: str, value: Any, commit: bool = False) -> None:
-        """Set an attribute of the record to the given value.
+    def __getattr__(self, name: str) -> Any:
+        """Get an attribute value from the record.
+
+        Overrides __getattr__ to make attribute access more natural-feeling.
+        Attributes on the record can be accessed with obj.attribute syntax.
+
+        If the record hasn't finished initialization yet, falls back to
+        default behavior.
 
         Args:
-            field_name: The name of the attribute to set.
-            value: The value.
-            commit: True if the record should be persisted.
-        """
-        RecordAttribute = self._flexible_model_for(BaseRecordAttribute)
-        if commit:
-            RecordAttribute._default_manager.update_or_create(
-                record=self,
-                field=self.fields[field_name],
-                defaults={
-                    "value": value,
-                },
-            )
-        else:
-            self._staged_changes[field_name] = RecordAttribute(
-                field=self.fields[field_name], value=value
-            ).value
+            name: The name of the attribute to get from the record.
 
+        Raises:
+            AttributeError: If the object has no attribute with the given
+                name.
+
+        Returns:
+            Any: The value of the attribute, if available.
+        """
+        if not self._initialized or name.startswith("_"):
+            return self.__getattribute__(name)
+
+        if name in self._fields:
+            return self._data[name]
+
+        raise AttributeError(
+            f"'{self.__class__.__name__}' object has no attribute '{name}'"
+        )
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Set an attribute value by name.
+
+        Args:
+            name: The name of the attribute to set.
+            value: The value that the attribute should be set to.
+        """
+        if not self._initialized or name.startswith("_"):
+            super().__setattr__(name, value)
+            return
+
+        if name in frozenset(f.name for f in self._meta.get_fields()):
+            super().__setattr__(name, value)
+            return
+
+        RecordAttribute = self._flexible_model_for(BaseRecordAttribute)
+        self._staged_changes[name] = RecordAttribute(
+            record=self,  # type: ignore
+            field=self._fields[name],
+            value=value,
+        ).value
         self._invalidate_cache()
 
     def _invalidate_cache(self) -> None:
-        """Invalidate any cached properties on the instance."""
+        """Invalidate cached properties on the Record."""
         try:
-            del self.data
+            del self._data
         except AttributeError:
             pass
 
+    @transaction.atomic
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save the record and invalidate the property caches."""
         super().save(*args, **kwargs)
+
+        # If there are no attributes to update, return early.
+        if not self._staged_changes:
+            return
+
+        # Upsert the record attributes.
+        RecordAttribute = self._flexible_model_for(BaseRecordAttribute)
+        attribute_map = {a.field.name: a for a in self._attributes.all()}
+
+        value_fields: Set[str] = set()
+        update: List[BaseRecordAttribute] = []
+        insert: List[BaseRecordAttribute] = []
         for field_name, value in self._staged_changes.items():
-            self.set_attribute(field_name, value, commit=True)
+            # Find the existing attribute object or create a new one.
+            attribute = attribute_map.get(field_name) or RecordAttribute(
+                record=self,  # type: ignore
+                field=self._fields[field_name],
+            )
+
+            # Set the value for the attribute.
+            attribute.value = value
+
+            # Add the attribute object to the appropriate operation set.
+            operation = update if attribute.pk else insert
+            operation.append(attribute)
+
+            # If we're updating, track which value column should be updated.
+            if operation is update:
+                value_fields.add(attribute.value_field_name)
+
+        # Perform bulk updates and inserts as necessary.
+        if update:
+            RecordAttribute._default_manager.bulk_update(
+                update, fields=(*value_fields,)
+            )
+        if insert:
+            RecordAttribute._default_manager.bulk_create(insert)
+
+        # Invalidate the cache.
         self._invalidate_cache()
 
 
@@ -612,9 +728,9 @@ class BaseRecordAttribute(FlexibleBaseModel):
         abstract = True
 
     # The `record` and `field` are set by the implementing class.
-    record: models.ForeignKey
+    record: BaseRecord
     record_id: int
-    field: models.ForeignKey
+    field: BaseField
     field_id: int
 
     def __str__(self) -> str:
@@ -923,7 +1039,7 @@ class FlexibleForms:
         """
         record_model = self.record_model or self._default_model(BaseRecord)
         record_model.add_to_class(  # type: ignore
-            "form",
+            "_form",
             models.ForeignKey(
                 form_model,
                 on_delete=models.CASCADE,
@@ -952,7 +1068,7 @@ class FlexibleForms:
             models.ForeignKey(
                 record_model,
                 on_delete=models.CASCADE,
-                related_name="attributes",
+                related_name="_attributes",
                 editable=False,
             ),
         )

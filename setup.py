@@ -31,10 +31,11 @@ setup(
     extras_require={
         "dev": [
             "autopep8==1.*,>=1.5.4", "black==20.*,>=20.8.0.b1",
-            "darglint==1.*,>=1.5.4", "django-nested-admin==3.*,>=3.3.2",
-            "django-stubs==1.*,>=1.5.0", "docformatter==1.*,>=1.3.1",
-            "factory-boy==3.*,>=3.0.1", "hypothesis[django]==5.*,>=5.26.0",
-            "isort==5.*,>=5.4.2", "mypy>=0.770", "pillow==7.*,>=7.2.0",
+            "darglint==1.*,>=1.5.4", "django-debug-toolbar==3.*,>=3.0.0",
+            "django-nested-admin==3.*,>=3.3.2", "django-stubs==1.*,>=1.5.0",
+            "docformatter==1.*,>=1.3.1", "factory-boy==3.*,>=3.0.1",
+            "hypothesis[django]==5.*,>=5.26.0", "isort==5.*,>=5.4.2",
+            "mypy>=0.770", "pillow==7.*,>=7.2.0",
             "psycopg2-binary==2.*,>=2.8.6", "pydocstyle==5.*,>=5.1.1",
             "pytest==6.*,>=6.0.1", "pytest-cov==2.*,>=2.10.1",
             "pytest-django==3.*,>=3.9.0", "pytest-mock==3.*,>=3.3.1",

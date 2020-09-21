@@ -2,6 +2,7 @@
 
 """Tests for form-related models."""
 
+import hashlib
 import warnings
 from datetime import timedelta
 from typing import Sequence, cast
@@ -315,14 +316,14 @@ def test_form_lifecycle() -> None:
     record_count = AppRecord.objects.count()
     unpersisted_record = django_form.save(commit=False)
     cleaned_record_data = django_form.cleaned_data
-    del cleaned_record_data["form"]
-    assert unpersisted_record.data == cleaned_record_data
+    del cleaned_record_data["_form"]
+    assert unpersisted_record._data == cleaned_record_data
     assert AppRecord.objects.count() == record_count
 
     # Saving the form with commit=True should produce the same result as
     # commit=False, but actually persist the changes to the database.
     persisted_record = django_form.save(commit=True)
-    assert persisted_record.data == cleaned_record_data
+    assert persisted_record._data == cleaned_record_data
     assert AppRecord.objects.count() == record_count + 1
 
     # Recreating the form should produce a valid, unchanged form. Calling
@@ -362,13 +363,13 @@ def test_file_upload() -> None:
     # The form should be valid, and saving it should produce a record.
     assert django_form.is_valid(), django_form.errors
     record = django_form.save()
-    assert isinstance(record.data[file_field.name], File)
+    assert isinstance(record.file, File)
 
     # Setting the field to False should result in a null value when cleaned.
     django_form = form.as_django_form(files={file_field.name: False}, instance=record)
     assert django_form.is_valid(), django_form.errors
     record = django_form.save()
-    assert record.data[file_field.name]._file is None
+    assert record.file._file is None
 
 
 @pytest.mark.django_db
@@ -469,7 +470,7 @@ def test_record(
                 data.draw(from_form(django_form_class)),
             )
 
-        django_form_instance.data["form"] = form
+        django_form_instance.data["_form"] = form
 
         # Set the files attribute (file fields are read from here).
         django_form_instance.files = {
@@ -489,9 +490,9 @@ def test_record(
         assert isinstance(record, AppRecord)
 
         # Ensure form records and their attributes have a friendly string representation.
-        assert str(record) == f"Record {record.pk} (form_id={record.form_id})"
+        assert str(record) == f"Record {record.pk} (_form_id={record._form_id})"
 
-        sample_attribute = record.attributes.first()
+        sample_attribute = record._attributes.first()
         assert (
             str(sample_attribute)
             == f"RecordAttribute {sample_attribute.pk} (record_id={sample_attribute.record_id}, field_id={sample_attribute.field_id})"
@@ -500,13 +501,18 @@ def test_record(
         # Assert that each field value can be retrieved from the database and
         # that it matches the value in the form's cleaned_data construct.
         for field_name, cleaned_value in django_form_instance.cleaned_data.items():
-            if field_name == "form":
-                continue
+            record_value = getattr(record, field_name)
 
-            record_value = record.data[field_name]
-
+            # File comparisons
             if isinstance(record_value, File):
                 assert record_value.size == cleaned_value.size
+                assert (
+                    hashlib.sha1(record_value.read()).hexdigest()
+                    == hashlib.sha1(cleaned_value.read()).hexdigest()
+                ), (
+                    f"The file cleaned by the RecordForm is different from "
+                    f"the file stored on the Record's '{field_name}' field."
+                )
             else:
                 assert record_value == cleaned_value
 
