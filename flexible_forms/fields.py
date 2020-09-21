@@ -128,21 +128,22 @@ class FlexibleField:
         Returns:
             form_fields.Field: An instance of the form field.
         """
-        # If a form widget is explicitly configured, use it.
-        if cls.form_widget_class:
-            kwargs["widget"] = cls.form_widget_class(
-                **{
-                    **cls.form_widget_options,
-                    **(form_widget_options or {}),
-                }
-            )
+        # Generate an appropriate form widget for the field.
+        FormWidget = cls.form_widget_class or cls.form_field_class.widget
+        form_widget = FormWidget(
+            **{
+                **cls.form_widget_options,
+                **(form_widget_options or {}),
+            }
+        )
 
-        # Generate the form field class.
+        # Generate the form field with its appropriate class and widget.
         form_field = cls.form_field_class(
+            widget=form_widget,
             **{
                 **cls.form_field_options,
                 **kwargs,
-            }
+            },
         )
 
         # Apply any modifiers to the field.
