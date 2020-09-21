@@ -74,18 +74,8 @@ class BaseRecordForm(forms.ModelForm):
         Returns:
             instance: The Record model instance.
         """
-        record = cast("BaseRecord", super().save(commit=False))
-
-        # If nothing has changed, noop and return the record as-is.
-        if not self.has_changed():
-            return record
-
         # Update any changed attributes.
         for field_name in self.changed_data:
-            cleaned_value = self.cleaned_data[field_name]
-            setattr(record, field_name, cleaned_value)
+            setattr(self.instance, field_name, self.cleaned_data[field_name])
 
-        if commit:
-            record.save()
-
-        return record
+        return cast("BaseRecord", super().save(commit=commit))
