@@ -158,6 +158,10 @@ class FlexibleField:
         if any(c[0] is None for c in getattr(form_field, "choices", [])):
             form_field.required = False
 
+        # This FieldType instance should be attached to the field for later
+        # reference in e.g. serializers.
+        form_field._flexible_field_type = cls
+
         return form_field
 
     @classmethod
@@ -230,9 +234,9 @@ class FlexibleField:
             # dict on the field.
             setattr(
                 form_field,
-                "_modifiers",
+                "_flexible_field_modifiers",
                 {
-                    **getattr(form_field, "_applied_modifiers", {}),
+                    **getattr(form_field, "_flexible_field_modifiers", {}),
                     attribute: expression_value,
                 },
             )
