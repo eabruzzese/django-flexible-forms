@@ -16,7 +16,7 @@ class FormJSONEncoder(DjangoJSONEncoder):
 
 
 def _to_json(data: Mapping[str, Any], **kwargs: Any) -> Mapping[str, Any]:
-    return json.dumps(data, cls=FormJSONEncoder, **kwargs)
+    return json.loads(json.dumps(data, cls=FormJSONEncoder, **kwargs))
 
 
 def form_to_json(form: forms.Form) -> Mapping[str, Any]:
@@ -61,7 +61,8 @@ def field_to_json(
             "error_messages": field.error_messages,
             "widget": widget_to_json(field.widget),
             "choices": list(
-                (str(value), label) for value, label in getattr(field, "choices", [])
+                {"value": str(value), "text": label}
+                for value, label in getattr(field, "choices", [])
             ),
         }
     )
