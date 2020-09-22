@@ -520,6 +520,7 @@ class RecordManager(models.Manager):
                 .select_related("_form")
                 .prefetch_related(
                     "_form__fields",
+                    "_form__fields__modifiers",
                     Prefetch(
                         "_attributes",
                         queryset=RecordAttribute.objects.select_related("field"),
@@ -575,7 +576,7 @@ class BaseRecord(FlexibleBaseModel):
         self._staged_changes = {}
         self._initialized = True
 
-    @property
+    @cached_property
     def _fields(self) -> Mapping[str, BaseField]:
         """Return a map of Fields for the Record's form, keyed by their names.
 
@@ -659,14 +660,17 @@ class BaseRecord(FlexibleBaseModel):
             field=self._fields[name],
             value=value,
         ).value
-        self._invalidate_cache()
+        self._invalidate_caches("_data")
 
-    def _invalidate_cache(self) -> None:
+    def _invalidate_caches(self, *caches: str) -> None:
         """Invalidate cached properties on the Record."""
-        try:
-            del self._data
-        except AttributeError:
-            pass
+        caches = caches or ("_data", "_fields")
+
+        for cache in caches:
+            try:
+                delattr(self, cache)
+            except AttributeError:
+                pass
 
     @transaction.atomic
     def save(self, *args: Any, **kwargs: Any) -> None:
@@ -710,8 +714,8 @@ class BaseRecord(FlexibleBaseModel):
         if insert:
             RecordAttribute._default_manager.bulk_create(insert)
 
-        # Invalidate the cache.
-        self._invalidate_cache()
+        # Invalidate the data cache.
+        self._invalidate_caches("_data")
 
 
 class BaseRecordAttribute(FlexibleBaseModel):

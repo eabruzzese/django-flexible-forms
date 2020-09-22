@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional, cast
 
 from django import forms
 from django.core.files.base import File
-from django.db import transaction
 from django.forms.fields import FileField
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -62,7 +61,6 @@ class BaseRecordForm(forms.ModelForm):
 
         return cleaned_data
 
-    @transaction.atomic
     def save(self, commit: bool = True) -> "BaseRecord":
         """Save the form data to a Record.
 
