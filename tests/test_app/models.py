@@ -27,7 +27,7 @@ class CustomBaseModel(models.Model):
     The swapping configuration is handled in settings.py.
     """
 
-    uuid = models.UUIDField(default=uuid.uuid4)
+    uuid = models.UUIDField(blank=True, default=uuid.uuid4)
 
     class Meta:
         abstract = True

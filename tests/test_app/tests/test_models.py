@@ -18,7 +18,7 @@ from django.utils.datastructures import MultiValueDict
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from hypothesis.extra.django import from_form
-from test_app.models import AppField, AppRecord
+from test_app.models import AppField, AppForm, AppRecord, AppRecordAttribute
 from test_app.tests.factories import FieldFactory, FormFactory
 
 from flexible_forms.fields import (
@@ -515,6 +515,93 @@ def test_record(
                 )
             else:
                 assert record_value == cleaned_value
+
+
+@pytest.mark.django_db
+def test_record_queries(django_assert_num_queries) -> None:
+    """Ensure that a minimal number of queries is required to fetch records."""
+    forms_count = 3
+    fields_per_form_count = len(FIELD_TYPES)
+    records_per_form_count = 1
+
+    forms = FormFactory.create_batch(forms_count)
+
+    for form in forms:
+        AppField.objects.bulk_create(
+            FieldFactory.build(
+                form=form, name=f"{field_type}_field", field_type=field_type
+            )
+            for field_type in FIELD_TYPES.keys()
+        )
+
+        record = AppRecord.objects.create(_form=form)
+        for field in form.fields.all():
+            setattr(record, field.name, None)
+        record.save()
+
+    # There should be `forms_count` forms in the database.
+    assert AppForm.objects.count() == forms_count
+
+    # There should be `forms_count * fields_per_form_count` fields in the database (one field per type in FIELD_TYPES).
+    assert AppField.objects.count() == forms_count * fields_per_form_count
+
+    # There should be `forms_count * records_per_form_count` records in the database.
+    assert AppRecord.objects.count() == forms_count * records_per_form_count
+
+    # There should be `forms_count * fields_per_form_count` records in the database (one record per form, one field per type in FIELD_TYPES).
+    assert AppRecordAttribute.objects.count() == forms_count * fields_per_form_count
+
+    # By default, the records QuerySet should only require these queries do
+    # perform all of the core responsibilities of the library from the
+    # perspective of Record instances (which is what most implementations will
+    # be interacting with most of the time in e.g. views):
+    #
+    #   * One to fetch the list of records; this should include a prefetch of its _form.
+    #   * One to fetch the list of field modifiers for the fields on the _form.
+    #   * One to fetch the list of _attributes for all of the records.
+    #   * One to fetch the list of fields for all of the attributes.
+    #
+    with django_assert_num_queries(4):
+        records = list(AppRecord.objects.all())
+
+    # Fetching the data from any of the records should not require any
+    # additional queries.
+    with django_assert_num_queries(0):
+        for record in records:
+            assert record._data != {}
+
+    # Validating an existing record against its Django form with no changes
+    # should require only the queries needed to validate that the _form is
+    # still a valid Form instance.
+    with django_assert_num_queries(2):
+        record = records[0]
+        django_form = record._form.as_django_form(instance=record)
+        assert django_form.is_valid(), django_form.errors
+
+    # Updating a record using a Django form should require these queries:
+    #
+    #   * Two SELECTs as part of form validation, both used to check that the
+    #     value of the _form field is valid.
+    #   * A SAVEPOINT query before saving the model.
+    #   * A single query to update the Record itself.
+    #   * A single bulk_update query to update the attributes that have changed.
+    #   * A RELEASE SAVEPOINT query after all of the queries have been executed.
+    #
+    with django_assert_num_queries(6):
+        record = records[1]
+        new_record_values = {
+            f"{SingleLineTextField.name()}_field": "new_value",
+            f"{MultiLineTextField.name()}_field": "another\nnew\nvalue",
+        }
+        django_form = record._form.as_django_form(
+            instance=record, data=new_record_values
+        )
+        assert django_form.is_valid(), django_form.errors
+
+        updated_record = django_form.save()
+
+        for attr, value in new_record_values.items():
+            assert getattr(updated_record, attr) == value
 
 
 def test_flexible_forms(mocker) -> None:
