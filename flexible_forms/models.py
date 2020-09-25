@@ -27,7 +27,7 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models, transaction
 from django.db.models.manager import BaseManager
 from django.db.models.query import Prefetch
-from django.forms.fields import FileField
+from django.forms.widgets import Widget
 from django.utils.datastructures import MultiValueDict
 from django.utils.functional import cached_property
 from django.utils.text import slugify
@@ -136,6 +136,19 @@ class BaseForm(FlexibleBaseModel):
 
         super().save(*args, **kwargs)
 
+    @property
+    def initial_values(self) -> "MultiValueDict[str, Any]":
+        """Return a mapping of initial values for the form."""
+        return MultiValueDict(
+            {
+                **{
+                    f.name: f.initial if isinstance(f.initial, list) else [f.initial]
+                    for f in self.fields.all()
+                },
+                "_form": [self],
+            }
+        )
+
     def as_django_form(
         self,
         data: Optional[Mapping[str, Any]] = None,
@@ -160,74 +173,75 @@ class BaseForm(FlexibleBaseModel):
         Returns:
             BaseRecordForm: A configured BaseRecordForm (a Django ModelForm instance).
         """
-        if isinstance(data, MultiValueDict):
-            data = data.dict()
-
-        if isinstance(files, MultiValueDict):
-            files = files.dict()
-
-        if isinstance(initial, MultiValueDict):
-            initial = initial.dict()
-
-        # Derive the Record model from the relationship field.
-        Record = self._flexible_model_for(BaseRecord)
-
-        instance = instance or Record(_form=self)  # type: ignore
-        data = cast(Mapping[str, Any], {**(data or instance._data), "_form": self.pk})
-        files = cast(Mapping[str, Any], files or {})
-        initial = cast(Mapping[str, Any], {**(initial or {}), "_form": self.pk})
-
-        class_name = self.name.title().replace("_", "")
-        form_class_name = f"{class_name}Form"
         all_fields = self.fields.all()
-        field_values = {
-            **instance._data,
-            **({k: data.get(k) for k in data.keys()}),
-            **({k: files.get(k) for k in files.keys()}),
-        }
 
-        # Generate the initial list of fields that comprise the form.
-        form_fields = {f.name: f.as_form_field() for f in all_fields}
+        # Build a MultiValueDict containing all field values. This combines all
+        # of the form data into a single structure that will be used when
+        # evaluating expressions against the form state.
+        form_state: MultiValueDict[str, Any] = self.initial_values
+        form_state.update(initial or {})
+        form_state.update(instance._data if instance else {})
+        form_state.update(data or {})
+        form_state.update(files or {})
 
         # Normalize the field values to ensure they are all cast to their
         # appropriate types (as defined by their corresponding form fields).
+        form_fields: MutableMapping[str, forms.Field] = {
+            f.name: f.as_form_field() for f in all_fields
+        }
         for field_name, form_field in form_fields.items():
-            field_value = field_values.get(field_name)
-            if isinstance(form_field, FileField) and field_value is False:
-                field_value = None
-            # HACK: If the widget allows for multiple selections, make sure the
-            # value is a list. This method should be refactored to use
-            # MultiValueDict structures instead.
-            if getattr(form_field.widget, "allow_multiple_selected", False):
-                field_value = [field_value]
-            field_values[field_name] = form_field.to_python(field_value)
+            field_widget = cast(Widget, form_field.widget)
+            field_value = field_widget.value_from_datadict(
+                data=form_state,  # type: ignore
+                files=form_state,
+                name=field_name,
+            )
+            # Try to perform as much of the value coercion process as possible
+            # while attempting to avoid running expensive validators.
+            try:
+                field_value = form_field.to_python(field_value)
+                if callable(getattr(form_field, "_coerce", None)):
+                    field_value = form_field._coerce(field_value)  # type: ignore
+            except ValidationError:
+                pass
+            form_state[field_name] = field_value
 
         # Regenerate the form fields, this time taking the field values into
         # account in order to inform any dynamic behaviors.
-        form_fields = {
-            f.name: f.as_form_field(
-                field_values=field_values,
-            )
-            for f in all_fields
-        }
+        form_fields = {}
+        for field in all_fields:
+            form_field = field.as_form_field(field_values=form_state)
+            form_fields[field.name] = form_field
 
-        # Dynamically generate a form class containing all of the fields.
-        # The BaseRecordForm is imported inline to prevent a circular import.
+        RecordModel = self._flexible_model_for(BaseRecord)
+
+        # Import the form class inline to prevent a circular import.
         from flexible_forms.forms import BaseRecordForm
 
+        form_name = f"{self.name.title().replace('_', '')}Form"
         form_class: Type[BaseRecordForm] = type(
-            form_class_name,
+            form_name,
             (BaseRecordForm,),
             {
                 "__module__": self.__module__,
-                "Meta": type("Meta", (BaseRecordForm.Meta,), {"model": Record}),
+                "Meta": type(
+                    "Meta",
+                    (BaseRecordForm.Meta,),
+                    {"model": RecordModel},
+                ),
                 **form_fields,
             },
         )
 
+        initial = {"_form": self, **(initial or {})}
+
         # Create a form instance from the form class and the passed parameters.
         form_instance = form_class(
-            data=data, files=files, instance=instance, initial=initial, **kwargs
+            data=data,
+            files=files,
+            instance=instance,
+            initial=initial,
+            **kwargs,
         )
 
         return form_instance
@@ -269,10 +283,11 @@ class BaseField(FlexibleBaseModel):
         help_text="If True, requires a value be present in the field.",
     )
 
-    initial = models.TextField(
+    initial = JSONField(
         blank=True,
-        default="",
+        null=True,
         help_text=("The default value if no value is given during initialization."),
+        encoder=DjangoJSONEncoder,
     )
 
     field_type = models.TextField(
@@ -567,7 +582,7 @@ class BaseRecord(FlexibleBaseModel):
         abstract = True
 
     def __str__(self) -> str:
-        return f"Record {self.pk} (_form_id={self._form_id if self._form else None})"
+        return f"Record {self.pk} (_form_id={self._form_id})"
 
     def __init__(
         self, *args: Any, _form: Optional[BaseForm] = None, **kwargs: Any
@@ -575,6 +590,21 @@ class BaseRecord(FlexibleBaseModel):
         super().__init__(*args, _form=_form, **kwargs)
         self._staged_changes = {}
         self._initialized = True
+
+    def as_django_form(self, *args: Any, **kwargs: Any) -> "BaseRecordForm":
+        """Create a Django form from the record.
+
+        Uses `self` as the `instance` argument to as_django_form()`
+
+        Args:
+            args: Passed to super.
+            kwargs: Passed to super.
+
+        Returns:
+            BaseRecordForm: A configured Django form for the record.
+        """
+        kwargs = {"instance": self, **kwargs}
+        return self._form.as_django_form(*args, **kwargs)
 
     @cached_property
     def _fields(self) -> Mapping[str, BaseField]:
@@ -584,6 +614,8 @@ class BaseRecord(FlexibleBaseModel):
             Mapping[str, BaseField]: A mapping of Field instances by their
                 names.
         """
+        if not hasattr(self, "_form"):
+            return {}
         return {f.name: f for f in self._form.fields.all()}
 
     @cached_property

@@ -207,6 +207,14 @@ sqlparse = ">=0.2.0"
 
 [[package]]
 category = "dev"
+description = "Extensions for Django"
+name = "django-extensions"
+optional = false
+python-versions = ">=3.5"
+version = "3.0.9"
+
+[[package]]
+category = "dev"
 description = "Django admin classes that allow for nested inlines"
 name = "django-nested-admin"
 optional = false
@@ -930,7 +938,7 @@ docs = ["sphinx", "jaraco.packaging (>=3.2)", "rst.linker (>=1.9)"]
 testing = ["jaraco.itertools", "func-timeout"]
 
 [metadata]
-content-hash = "58a3e41fc5d18d41c2008831c32d511a22c72b062a80c30e5f040806e8ed8ec9"
+content-hash = "80fda43f993c097cd4d42af3bac00387a5388137c451c1983c477c5488f667c2"
 lock-version = "1.0"
 python-versions = "^3.6"
 
@@ -1037,6 +1045,10 @@ django = [
 django-debug-toolbar = [
     {file = "django-debug-toolbar-3.0.tar.gz", hash = "sha256:23129b4f771605c7ccf8733cc53558a68c5d463d60cdc83408d34b713acf4f5f"},
     {file = "django_debug_toolbar-3.0-py3-none-any.whl", hash = "sha256:7c9bf93eabb1e745fe1fca830242d49f3c839d35163e5b53914009ed111209b1"},
+]
+django-extensions = [
+    {file = "django-extensions-3.0.9.tar.gz", hash = "sha256:6809c89ca952f0e08d4e0766bc0101dfaf508d7649aced1180c091d737046ea7"},
+    {file = "django_extensions-3.0.9-py3-none-any.whl", hash = "sha256:dc663652ac9460fd06580a973576820430c6d428720e874ae46b041fa63e0efa"},
 ]
 django-nested-admin = [
     {file = "django-nested-admin-3.3.2.tar.gz", hash = "sha256:7ec58af67107e6d7b2d0fd4fe03629eff8f7957c4aef5033c4700da1bd2d7870"},

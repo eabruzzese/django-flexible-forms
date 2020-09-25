@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "nested_admin",
     "debug_toolbar",
+    "django_extensions",
     "flexible_forms",
     "test_app.apps.TestAppConfig",
 ]

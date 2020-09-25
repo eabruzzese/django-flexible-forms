@@ -14,7 +14,6 @@ from django.core.files.base import File
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import models
 from django.forms.widgets import HiddenInput, Select, Textarea, TextInput
-from django.utils.datastructures import MultiValueDict
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from hypothesis.extra.django import from_form
@@ -326,10 +325,10 @@ def test_form_lifecycle() -> None:
     assert persisted_record._data == cleaned_record_data
     assert AppRecord.objects.count() == record_count + 1
 
-    # Recreating the form should produce a valid, unchanged form. Calling
-    # save() on the form should noop.
-    same_form = form.as_django_form(instance=persisted_record)
-    assert same_form.initial == same_form.data
+    # Recreating the form from the persisted record should produce a valid,
+    # unchanged form. Calling save() on the form should noop.
+    same_form = persisted_record.as_django_form(field_values)
+    assert same_form.initial == {**persisted_record._data, "_form": form}
     assert same_form.is_valid(), same_form.errors
     assert not same_form.has_changed(), same_form.changed_data
     same_record = same_form.save()
@@ -387,17 +386,30 @@ def test_initial_values() -> None:
         initial=0,
     )
     django_form = form.as_django_form()
-    assert django_form.initial["test_field"] == "0"
+    assert not django_form.is_bound
+    assert django_form.initial.get(field.name) == field.initial
 
-    django_form = form.as_django_form(initial=MultiValueDict({field.name: [123]}))
-    assert django_form.initial["test_field"] == 123
+    django_form = form.as_django_form(data={})
+    assert django_form.is_bound
+    assert django_form.initial.get(field.name) == field.initial
+
+    django_form = form.as_django_form(initial={field.name: 123})
+    assert not django_form.is_bound
+    assert django_form.initial.get(field.name) == 123
+
+    django_form = form.as_django_form(data={}, initial={field.name: 123})
+    assert django_form.is_bound
+    assert django_form.initial.get(field.name) == 123
 
 
 @pytest.mark.django_db
 def test_noop_modifier_attribute() -> None:
     """Ensure that a nonexistent attribute in a modifier is a noop.
 
-    Field modifiers can be
+    If a FieldModifier modifies an attribute that does not exist on the
+    field and has no explicit handler on the field type, its only effect
+    should be that it appears in the "_modifiers" dict on the rendered
+    form field.
     """
     form = FormFactory(label="Orphan Field Modifier")
 
@@ -464,29 +476,26 @@ def test_record(
         # Fill out the form (and use the same strategy for the form field as
         # the model field when handling durations)
         with patch_field_strategies({forms.DurationField: duration_strategy}):
-            django_form_class = form.as_django_form().__class__
-            django_form_instance = cast(
+            django_form = cast(
                 forms.ModelForm,
-                data.draw(from_form(django_form_class)),
+                data.draw(from_form(type(form.as_django_form()))),
             )
 
-        django_form_instance.data["_form"] = form
+        django_form.data["_form"] = form
 
         # Set the files attribute (file fields are read from here).
-        django_form_instance.files = {
+        django_form.files = {
             field: value
-            for field, value in django_form_instance.data.items()
+            for field, value in django_form.data.items()
             if isinstance(value, File)
         }
 
         # Assert that it's valid when filled out (and output the errors if it's
         # not).
-        assert (
-            django_form_instance.is_valid()
-        ), f"The form was not valid: {django_form_instance.errors}"
+        assert django_form.is_valid(), f"The form was not valid: {django_form.errors}"
 
         # Assert that saving the Django form results in a Record instance.
-        record = django_form_instance.save()
+        record = django_form.save()
         assert isinstance(record, AppRecord)
 
         # Ensure form records and their attributes have a friendly string representation.
@@ -500,7 +509,7 @@ def test_record(
 
         # Assert that each field value can be retrieved from the database and
         # that it matches the value in the form's cleaned_data construct.
-        for field_name, cleaned_value in django_form_instance.cleaned_data.items():
+        for field_name, cleaned_value in django_form.cleaned_data.items():
             record_value = getattr(record, field_name)
 
             # File comparisons
@@ -514,7 +523,48 @@ def test_record(
                     f"the file stored on the Record's '{field_name}' field."
                 )
             else:
-                assert record_value == cleaned_value
+                assert (
+                    record_value == cleaned_value
+                ), f"Expected the record {field_name} to have value {repr(cleaned_value)} but got {repr(record_value)}"
+
+
+@pytest.mark.django_db
+def test_disabled_validation() -> None:
+    """Ensure that validation can be skipped when saving a record form.
+
+    In some scenarios it's useful to be able to save a record in an
+    invalid state (e.g., storing form inputs to be modified later).
+    Passing validate=False to form.save() will trigger this behavior.
+    """
+    form = FormFactory()
+
+    # Generate a field of every type and make them required.
+    AppField.objects.bulk_create(
+        FieldFactory.build(
+            form=form, name=f"{field_type}_field", field_type=field_type, required=True
+        )
+        for field_type in FIELD_TYPES.keys()
+    )
+
+    # Create a Django form from our form definition.
+    django_form = form.as_django_form(data={})
+
+    # The form should not be valid because we haven't entered any data yet.
+    assert not django_form.is_valid()
+
+    # Attempting to save the form normally will raise a ValidationError.
+    with pytest.raises(ValueError):
+        django_form.save()
+
+    # Passing validate=False should allow the record to be saved.
+    record = django_form.save(validate=False)
+
+    # Trying to save a record containing completely invalid data for a field
+    # should make a best effort to save as many attributes as possible.
+    record.SingleLineTextField_field = "some different text"
+    record.DateTimeField_field = "not a datetime"
+    with pytest.raises(ValidationError):
+        record.save()
 
 
 @pytest.mark.django_db
@@ -575,7 +625,7 @@ def test_record_queries(django_assert_num_queries) -> None:
     # still a valid Form instance.
     with django_assert_num_queries(2):
         record = records[0]
-        django_form = record._form.as_django_form(instance=record)
+        django_form = record._form.as_django_form(data={}, instance=record)
         assert django_form.is_valid(), django_form.errors
 
     # Updating a record using a Django form should require these queries:

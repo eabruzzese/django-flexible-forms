@@ -2,14 +2,14 @@
 """Forms that power the flexible_forms module."""
 
 import datetime
-from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional, cast
+from typing import Any, Dict, Mapping, Optional, cast
 
 from django import forms
 from django.core.files.base import File
 from django.forms.fields import FileField
+from django.forms.models import ModelChoiceIteratorValue  # type: ignore
 
-if TYPE_CHECKING:  # pragma: no cover
-    from flexible_forms.models import BaseRecord
+from flexible_forms.models import BaseRecord
 
 
 class BaseRecordForm(forms.ModelForm):
@@ -21,6 +21,7 @@ class BaseRecordForm(forms.ModelForm):
 
     class Meta:
         fields = ("_form",)
+        model: "BaseRecord"
 
     def __init__(
         self,
@@ -30,21 +31,37 @@ class BaseRecordForm(forms.ModelForm):
         initial: Optional[Mapping[str, Any]] = None,
         **kwargs: Any,
     ) -> None:
-        initial_data = {
-            **(instance._data if instance else {}),
-            **(initial or {}),
-        }
+        opts = self._meta  # type: ignore
+
+        # Extract the form definition from the given data, the instance, or the
+        # initial values.
+        self._form = (
+            (data or {}).get("_form")
+            or getattr(instance, "_form", None)
+            or (initial or {}).get("_form")
+        )
+
+        if isinstance(self._form, ModelChoiceIteratorValue):
+            self._form = self._form.instance
+
+        # If no record instance was given, create a new (empty) one and use its
+        # data for the initial form values.
+        instance = instance or opts.model(_form=self._form)
+        initial = {**instance._data, **(initial or {}), "_form": self._form}
 
         super().__init__(
-            data=data, files=files, instance=instance, initial=initial_data, **kwargs
+            data=data, files=files, instance=instance, initial=initial, **kwargs
         )
+
+        if self._form:
+            self.fields["_form"].disabled = True
 
     def clean(self) -> Dict[str, Any]:
         """Clean the form data before saving."""
         cleaned_data = super().clean()
 
         for key, value in cleaned_data.items():
-            field = {**self.base_fields, **self.fields}.get(key)
+            field = self.fields.get(key)
 
             # Time-only values cannot be timezone aware, so we remove the
             # timezone if one is given.
@@ -61,13 +78,15 @@ class BaseRecordForm(forms.ModelForm):
 
         return cleaned_data
 
-    def save(self, commit: bool = True) -> "BaseRecord":
+    def save(self, commit: bool = True, validate: bool = True) -> "BaseRecord":
         """Save the form data to a Record.
 
         Maps the cleaned form data into the Record's _data field.
 
         Args:
             commit: If True, persists the data to the database.
+            validate: If False, attempts to persist the record even if
+                validation is failing.
 
         Returns:
             instance: The Record model instance.
@@ -76,4 +95,9 @@ class BaseRecordForm(forms.ModelForm):
         for field_name in self.changed_data:
             setattr(self.instance, field_name, self.cleaned_data[field_name])
 
-        return cast("BaseRecord", super().save(commit=commit))
+        if commit and not validate:
+            self.instance.save()
+        else:
+            super().save(commit=commit)
+
+        return cast("BaseRecord", self.instance)
