@@ -153,11 +153,6 @@ class FlexibleField:
             field_values=field_values,
         )
 
-        # Any fields with "None" as an option in their choices can never be
-        # required.
-        if any(c[0] is None for c in getattr(form_field, "choices", [])):
-            form_field.required = False
-
         return form_field
 
     @classmethod
@@ -232,7 +227,7 @@ class FlexibleField:
                 form_field,
                 "_modifiers",
                 {
-                    **getattr(form_field, "_applied_modifiers", {}),
+                    **getattr(form_field, "_modifiers", {}),
                     attribute: expression_value,
                 },
             )
@@ -401,8 +396,8 @@ class YesNoRadioField(FlexibleField):
     form_field_class = form_fields.TypedChoiceField
     form_field_options = {
         "choices": (
-            (True, "Yes"),
-            (False, "No"),
+            ("True", "Yes"),
+            ("False", "No"),
         ),
         "coerce": lambda v: True if v in ("True", True) else False,
     }
@@ -418,9 +413,9 @@ class YesNoUnknownRadioField(FlexibleField):
     form_field_class = form_fields.TypedChoiceField
     form_field_options = {
         "choices": (
-            (True, "Yes"),
-            (False, "No"),
-            (None, "Unknown"),
+            ("True", "Yes"),
+            ("False", "No"),
+            ("None", "Unknown"),
         ),
         "coerce": lambda v: (
             True if v in ("True", True) else False if v in ("False", False) else None
@@ -439,8 +434,8 @@ class YesNoSelectField(FlexibleField):
     form_field_class = form_fields.TypedChoiceField
     form_field_options = {
         "choices": (
-            (True, "Yes"),
-            (False, "No"),
+            ("True", "Yes"),
+            ("False", "No"),
         ),
         "coerce": lambda v: True if v in ("True", True) else False,
     }
@@ -456,9 +451,9 @@ class YesNoUnknownSelectField(FlexibleField):
     form_field_class = form_fields.TypedChoiceField
     form_field_options = {
         "choices": (
-            (True, "Yes"),
-            (False, "No"),
-            (None, "Unknown"),
+            ("True", "Yes"),
+            ("False", "No"),
+            ("None", "Unknown"),
         ),
         "coerce": lambda v: (
             True if v in ("True", True) else False if v in ("False", False) else None
