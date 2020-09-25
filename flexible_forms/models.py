@@ -614,6 +614,8 @@ class BaseRecord(FlexibleBaseModel):
             Mapping[str, BaseField]: A mapping of Field instances by their
                 names.
         """
+        if not hasattr(self, "_form"):
+            return {}
         return {f.name: f for f in self._form.fields.all()}
 
     @cached_property
