@@ -32,6 +32,7 @@ setup(
         "dev": [
             "autopep8==1.*,>=1.5.4", "black==20.*,>=20.8.0.b1",
             "darglint==1.*,>=1.5.4", "django-debug-toolbar==3.*,>=3.0.0",
+            "django-extensions==3.*,>=3.0.9",
             "django-nested-admin==3.*,>=3.3.2", "django-stubs==1.*,>=1.5.0",
             "docformatter==1.*,>=1.3.1", "factory-boy==3.*,>=3.0.1",
             "hypothesis[django]==5.*,>=5.26.0", "isort==5.*,>=5.4.2",
