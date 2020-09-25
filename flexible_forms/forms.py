@@ -78,13 +78,15 @@ class BaseRecordForm(forms.ModelForm):
 
         return cleaned_data
 
-    def save(self, commit: bool = True) -> "BaseRecord":
+    def save(self, commit: bool = True, validate: bool = True) -> "BaseRecord":
         """Save the form data to a Record.
 
         Maps the cleaned form data into the Record's _data field.
 
         Args:
             commit: If True, persists the data to the database.
+            validate: If False, attempts to persist the record even if
+                validation is failing.
 
         Returns:
             instance: The Record model instance.
@@ -93,4 +95,9 @@ class BaseRecordForm(forms.ModelForm):
         for field_name in self.changed_data:
             setattr(self.instance, field_name, self.cleaned_data[field_name])
 
-        return cast("BaseRecord", super().save(commit=commit))
+        if commit and not validate:
+            self.instance.save()
+        else:
+            super().save(commit=commit)
+
+        return cast("BaseRecord", self.instance)
