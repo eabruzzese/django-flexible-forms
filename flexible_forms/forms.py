@@ -7,9 +7,8 @@ from typing import Any, Dict, Mapping, Optional, cast
 from django import forms
 from django.core.files.base import File
 from django.forms.fields import FileField
-from django.forms.models import ModelChoiceIteratorValue  # type: ignore
 
-from flexible_forms.models import BaseRecord
+from flexible_forms.models import BaseForm, BaseRecord
 
 
 class BaseRecordForm(forms.ModelForm):
@@ -41,8 +40,11 @@ class BaseRecordForm(forms.ModelForm):
             or (initial or {}).get("_form")
         )
 
-        if isinstance(self._form, ModelChoiceIteratorValue):
-            self._form = self._form.instance
+        # In some situations, the _form might be a ModelChoiceIteratorValue
+        # that needs to be unpacked.
+        form_instance = getattr(self._form, "instance", None)
+        if isinstance(form_instance, BaseForm):
+            self._form = form_instance
 
         # If no record instance was given, create a new (empty) one and use its
         # data for the initial form values.
