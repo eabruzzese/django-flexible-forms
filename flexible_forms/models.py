@@ -3,6 +3,7 @@
 """Model definitions for the flexible_forms module."""
 
 import inspect
+from itertools import groupby
 import logging
 import weakref
 from types import ModuleType
@@ -15,21 +16,29 @@ from typing import (
     MutableMapping,
     Optional,
     Set,
+    Tuple,
     Type,
     TypeVar,
     Union,
     cast,
 )
 
+from django.core import checks
 from django import forms
-from django.core.exceptions import ImproperlyConfigured, ValidationError
+from django.contrib.admin.checks import BaseModelAdminChecks
+from django.core.exceptions import (
+    ImproperlyConfigured,
+    ValidationError,
+)
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models, transaction
+from django.db.models import OrderWrt
 from django.db.models.manager import BaseManager
 from django.db.models.query import Prefetch
 from django.forms.widgets import Widget
 from django.utils.datastructures import MultiValueDict
 from django.utils.functional import cached_property
+from django.utils.safestring import mark_safe
 from django.utils.text import slugify
 from simpleeval import FunctionNotDefined, NameNotDefined
 
@@ -105,6 +114,7 @@ class BaseForm(FlexibleBaseModel):
             "The machine-friendly name of the form. Computed automatically "
             "from the label if not specified."
         ),
+        unique=True,
     )
     label = models.TextField(
         blank=True,
@@ -148,6 +158,73 @@ class BaseForm(FlexibleBaseModel):
                 "_form": [self],
             }
         )
+
+    @cached_property
+    def django_fieldsets(self) -> Tuple[str, Mapping[str, Any]]:
+        """Generate a Django fieldsets configuration for the form.
+
+        The Django admin supports the specification of fieldsets -- a simple
+        way of grouping fields together. This property builds
+        """
+        django_fieldsets = ()
+
+        fields = sorted(self.fields.all(), key=lambda f: f._order)
+        fieldsets = sorted(self.fieldsets.all(), key=lambda f: f._order)
+
+        seen_fields = set()
+        for fieldset in fieldsets:
+            fieldset_items = ()
+
+            # Sort the fieldset items by their vertical weight, then group them
+            # by that weight. This creates "rows" of items that have the same
+            # vertical_weight.
+            vertically_sorted_items = sorted(
+                fieldset.items.all(), key=lambda f: f.vertical_weight
+            )
+            vertical_groups = groupby(
+                vertically_sorted_items,
+                lambda f: f.vertical_weight,
+            )
+
+            # For each of the vertical groups that were created, sort them by
+            # their horizontal_weight. This sets their horizontal display order
+            # so that items with a lower horizontal weight are displayed first.
+            for _weight, vertical_group in vertical_groups:
+                sorted_group = [
+                    i.field.name
+                    for i in sorted(vertical_group, key=lambda i: i.horizontal_weight)
+                ]
+                seen_fields.update(sorted_group)
+                fieldset_items = (
+                    *fieldset_items,
+                    sorted_group if len(sorted_group) > 1 else sorted_group[0],
+                )
+
+            # Add the configured fieldset to the rest of them.
+            django_fieldsets = (
+                *django_fieldsets,
+                (
+                    fieldset.name,
+                    {
+                        "classes": fieldset.classes.split(" "),
+                        "description": fieldset.description,
+                        "fields": fieldset_items,
+                    },
+                ),
+            )
+
+        extra_fieldset = (None, {"fields": ()})
+        for field in fields:
+            if field.name in seen_fields:
+                continue
+            extra_fieldset[1]["fields"] = (
+                *extra_fieldset[1]["fields"],
+                field.name,
+            )
+
+        django_fieldsets = (*django_fieldsets, extra_fieldset)
+
+        return tuple(django_fieldsets) or None
 
     def as_django_form(
         self,
@@ -315,7 +392,6 @@ class BaseField(FlexibleBaseModel):
     class Meta:
         abstract = True
         unique_together = ("form", "name")
-        order_with_respect_to = "name"
 
     def __str__(self) -> str:
         return self.label or "New Field"
@@ -536,6 +612,8 @@ class RecordManager(models.Manager):
                 .prefetch_related(
                     "_form__fields",
                     "_form__fields__modifiers",
+                    "_form__fieldsets",
+                    "_form__fieldsets__items",
                     Prefetch(
                         "_attributes",
                         queryset=RecordAttribute.objects.select_related("field"),
@@ -543,6 +621,53 @@ class RecordManager(models.Manager):
                 )
             ),
         )
+
+
+class BaseFieldset(FlexibleBaseModel):
+
+    form: BaseForm
+    fieldset_items: BaseManager["BaseFieldsetItem"]
+
+    name = models.TextField(
+        blank=True,
+        null=True,
+        help_text="The heading to be used for the fieldset. If left empty, no heading will appear.",
+    )
+    description = models.TextField(
+        blank=True, null=True, help_text="The description of the fieldset."
+    )
+    classes = models.TextField(
+        blank=True,
+        default="",
+        help_text="CSS classes to be be applied to the fieldset when rendered.",
+    )
+
+    class Meta:
+        abstract = True
+
+
+class BaseFieldsetItem(FlexibleBaseModel):
+
+    fieldset: BaseFieldset
+    field: BaseField
+
+    vertical_weight = models.IntegerField(
+        help_text=(
+            "The vertical weight of the item within the fieldset. Items with a lower "
+            "vertical weight are displayed first. Items with the same vertical weight "
+            "will be displayed on the same line."
+        )
+    )
+    horizontal_weight = models.IntegerField(
+        help_text=(
+            "The horizontal weight of the item within its vertical position. Items "
+            "with a lower weight are displayed first."
+        )
+    )
+
+    class Meta:
+        abstract = True
+        unique_together = ("fieldset", "vertical_weight", "horizontal_weight")
 
 
 class BaseRecord(FlexibleBaseModel):
@@ -921,6 +1046,8 @@ class FlexibleForms:
     form_model: Optional[Type[BaseForm]] = None
     field_model: Optional[Type[BaseField]] = None
     field_modifier_model: Optional[Type[BaseFieldModifier]] = None
+    fieldset_model: Optional[Type[BaseFieldset]] = None
+    fieldset_item_model: Optional[Type[BaseFieldsetItem]] = None
     record_model: Optional[Type[BaseRecord]] = None
     record_attribute_model: Optional[Type[BaseRecordAttribute]] = None
 
@@ -956,6 +1083,10 @@ class FlexibleForms:
         self.field_modifier_model = self._make_field_modifier_model(
             field_model=self.field_model
         )
+        self.fieldset_model = self._make_fieldset_model(form_model=self.form_model)
+        self.fieldset_item_model = self._make_fieldset_item_model(
+            fieldset_model=self.fieldset_model, field_model=self.field_model
+        )
         self.record_model = self._make_record_model(form_model=self.form_model)
         self.record_attribute_model = self._make_record_attribute_model(
             record_model=self.record_model, field_model=self.field_model
@@ -967,6 +1098,8 @@ class FlexibleForms:
         model_map = {
             BaseForm: self.form_model,
             BaseField: self.field_model,
+            BaseFieldset: self.fieldset_model,
+            BaseFieldsetItem: self.fieldset_item_model,
             BaseFieldModifier: self.field_modifier_model,
             BaseRecord: self.record_model,
             BaseRecordAttribute: self.record_attribute_model,
@@ -1000,6 +1133,10 @@ class FlexibleForms:
             self.field_model = model
         elif issubclass(model, BaseFieldModifier):
             self.field_modifier_model = model
+        elif issubclass(model, BaseFieldset):
+            self.fieldset_model = model
+        elif issubclass(model, BaseFieldsetItem):
+            self.fieldset_item_model = model
         elif issubclass(model, BaseRecord):
             self.record_model = model
         elif issubclass(model, BaseRecordAttribute):
@@ -1028,16 +1165,75 @@ class FlexibleForms:
             Type[BaseField]: The prepared Field class.
         """
         field_model = self.field_model or self._default_model(BaseField)
-        field_model.add_to_class(  # type: ignore
-            "form",
-            models.ForeignKey(
-                form_model,
-                on_delete=models.CASCADE,
-                related_name="fields",
-                editable=False,
-            ),
+        form_field = models.ForeignKey(
+            form_model,
+            name="form",
+            on_delete=models.CASCADE,
+            related_name="fields",
+            editable=False,
         )
+        field_model.add_to_class(form_field.name, form_field)  # type: ignore
+        field_model._meta.order_with_respect_to = form_field
+        field_model._meta.ordering = ("_order",)
+        field_model.add_to_class("_order", OrderWrt())
         return field_model
+
+    def _make_fieldset_model(self, form_model: Type[BaseForm]) -> Type[BaseFieldset]:
+        """Prepare the Fieldset model.
+
+        Args:
+            form_model: The model to use when building the "form" foreign key association.
+
+        Returns:
+            Type[BaseFieldset]: The prepared Fieldset class.
+        """
+        fieldset_model = self.fieldset_model or self._default_model(BaseFieldset)
+        form_field = models.ForeignKey(
+            form_model,
+            name="form",
+            on_delete=models.CASCADE,
+            related_name="fieldsets",
+            editable=False,
+        )
+        fieldset_model.add_to_class(form_field.name, form_field)  # type: ignore
+        fieldset_model._meta.order_with_respect_to = form_field
+        fieldset_model._meta.ordering = ("_order",)
+        fieldset_model.add_to_class("_order", OrderWrt())
+        return fieldset_model
+
+    def _make_fieldset_item_model(
+        self, fieldset_model: Type[BaseFieldset], field_model: Type[BaseField]
+    ) -> Type[BaseFieldsetItem]:
+        """Prepare the FieldsetItem model.
+
+        Args:
+            field_model: The model to use when building the "field" foreign key association.
+
+        Returns:
+            Type[BaseFieldsetItem]: The prepared FieldsetItem class.
+        """
+        fieldset_item_model = self.fieldset_item_model or self._default_model(
+            BaseFieldsetItem
+        )
+        fieldset_field = models.ForeignKey(
+            fieldset_model,
+            name="fieldset",
+            on_delete=models.CASCADE,
+            related_name="items",
+        )
+        fieldset_item_model.add_to_class(fieldset_field.name, fieldset_field)  # type: ignore
+        field_field = models.OneToOneField(
+            field_model,
+            name="field",
+            on_delete=models.CASCADE,
+            related_name="fieldset_item",
+        )
+        fieldset_item_model.add_to_class(field_field.name, field_field)  # type: ignore
+        fieldset_item_model._meta.order_with_respect_to = fieldset_field
+        fieldset_item_model._meta.ordering = ("_order",)
+        fieldset_item_model.add_to_class("_order", OrderWrt())
+
+        return fieldset_item_model
 
     def _make_field_modifier_model(
         self, field_model: Type[BaseField]
