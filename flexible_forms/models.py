@@ -175,24 +175,24 @@ class BaseForm(FlexibleBaseModel):
         for fieldset in fieldsets:
             fieldset_items = ()
 
-            # Sort the fieldset items by their vertical weight, then group them
-            # by that weight. This creates "rows" of items that have the same
-            # vertical_weight.
+            # Sort the fieldset items by their vertical order, then group them
+            # by that order. This creates "rows" of items that have the same
+            # vertical_order.
             vertically_sorted_items = sorted(
-                fieldset.items.all(), key=lambda f: f.vertical_weight
+                fieldset.items.all(), key=lambda f: f.vertical_order
             )
             vertical_groups = groupby(
                 vertically_sorted_items,
-                lambda f: f.vertical_weight,
+                lambda f: f.vertical_order,
             )
 
             # For each of the vertical groups that were created, sort them by
-            # their horizontal_weight. This sets their horizontal display order
-            # so that items with a lower horizontal weight are displayed first.
-            for _weight, vertical_group in vertical_groups:
+            # their horizontal_order. This sets their horizontal display order
+            # so that items with a lower horizontal order are displayed first.
+            for _order, vertical_group in vertical_groups:
                 sorted_group = [
                     i.field.name
-                    for i in sorted(vertical_group, key=lambda i: i.horizontal_weight)
+                    for i in sorted(vertical_group, key=lambda i: i.horizontal_order)
                 ]
                 seen_fields.update(sorted_group)
                 fieldset_items = (
@@ -651,23 +651,23 @@ class BaseFieldsetItem(FlexibleBaseModel):
     fieldset: BaseFieldset
     field: BaseField
 
-    vertical_weight = models.IntegerField(
+    vertical_order = models.IntegerField(
         help_text=(
-            "The vertical weight of the item within the fieldset. Items with a lower "
-            "vertical weight are displayed first. Items with the same vertical weight "
+            "The vertical order of the item within the fieldset. Items with a lower "
+            "vertical order are displayed first. Items with the same vertical order "
             "will be displayed on the same line."
         )
     )
-    horizontal_weight = models.IntegerField(
+    horizontal_order = models.IntegerField(
         help_text=(
-            "The horizontal weight of the item within its vertical position. Items "
-            "with a lower weight are displayed first."
+            "The horizontal order of the item within its vertical position. Items "
+            "with a lower order are displayed first."
         )
     )
 
     class Meta:
         abstract = True
-        unique_together = ("fieldset", "vertical_weight", "horizontal_weight")
+        unique_together = ("fieldset", "vertical_order", "horizontal_order")
 
 
 class BaseRecord(FlexibleBaseModel):
