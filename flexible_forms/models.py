@@ -615,7 +615,7 @@ class BaseFieldset(FlexibleBaseModel):
     """A section of Fields within a Form."""
 
     form: BaseForm
-    items: BaseManager["BaseFieldsetItem"]
+    items: "BaseManager[BaseFieldsetItem]"
     _order: int
 
     name = models.TextField(
