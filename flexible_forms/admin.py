@@ -3,7 +3,7 @@
 """Django admin configurations for flexible_forms."""
 
 import logging
-from typing import Any, Iterable, Optional, Type, cast
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, cast
 
 from django import forms
 from django.conf import settings
@@ -17,6 +17,8 @@ from django.utils.safestring import SafeText, mark_safe
 from flexible_forms.models import (
     BaseField,
     BaseFieldModifier,
+    BaseFieldset,
+    BaseFieldsetItem,
     BaseForm,
     BaseRecord,
 )
@@ -39,6 +41,17 @@ else:  # pragma: no cover
     TabularInline = admin.TabularInline
 
 
+DEFAULT_FORMFIELD_OVERRIDES = {
+    models.TextField: {
+        "widget": forms.widgets.TextInput(
+            attrs={
+                "size": "50",
+            },
+        ),
+    },
+}
+
+
 class FieldModifiersInline(TabularInline):
     """An inline representing a single modifier for a field on a form."""
 
@@ -46,35 +59,18 @@ class FieldModifiersInline(TabularInline):
     model = BaseFieldModifier
     extra = 1
 
-    formfield_overrides = {
-        models.TextField: {
-            "widget": forms.widgets.TextInput(
-                attrs={
-                    "size": "50",
-                },
-            ),
-        },
-    }
+    formfield_overrides = DEFAULT_FORMFIELD_OVERRIDES
 
 
 class FieldsInline(StackedInline):
     """An inline representing a single field on a Form."""
 
     classes = ("collapse",)
-    exclude = ("_order", "label_suffix")
     model = BaseField
     extra = 1
     fk_name = "form"
 
-    formfield_overrides = {
-        models.TextField: {
-            "widget": forms.widgets.TextInput(
-                attrs={
-                    "size": "50",
-                },
-            ),
-        },
-    }
+    formfield_overrides = DEFAULT_FORMFIELD_OVERRIDES
 
     @property
     def inlines(self) -> Iterable[InlineModelAdmin]:
@@ -98,21 +94,84 @@ class FieldsInline(StackedInline):
         )
 
 
+class FieldsetItemsInline(TabularInline):
+    """An inline representing an item in a fieldset on a Form."""
+
+    model = BaseFieldsetItem
+    extra = 1
+
+    formfield_overrides = DEFAULT_FORMFIELD_OVERRIDES
+
+    def formfield_for_foreignkey(
+        self, db_field: models.Field, request: HttpRequest, **kwargs: Any
+    ) -> forms.Field:
+        """Modify ForeignKey fields before they're rendered to the form.
+
+        Restricts the "field" choices to only include Fields for the current
+        Form.
+
+        Args:
+            db_field: The model field to be rendered to the form.
+            request: The current HTTP request.
+            kwargs: Passed to super.
+
+        Returns:
+            forms.Field: A configured form field for the given db_field.
+        """
+        if db_field.name == "field":
+            form_id = request.resolver_match.kwargs.get("object_id")
+            Field = self.model._flexible_model_for(BaseField)
+            kwargs["queryset"] = (
+                Field._default_manager.filter(form=form_id)
+                if form_id
+                else Field._default_manager.none()
+            )
+        return cast(
+            forms.Field, super().formfield_for_foreignkey(db_field, request, **kwargs)
+        )
+
+
+class FieldsetsInline(StackedInline):
+    """An inline representing a fieldset on a Form."""
+
+    classes = ("collapse",)
+    model = BaseFieldset
+    extra = 1
+    fk_name = "form"
+
+    formfield_overrides = DEFAULT_FORMFIELD_OVERRIDES
+
+    @property
+    def inlines(self) -> Iterable[InlineModelAdmin]:
+        """Return valid inlines for the given BaseFieldset implementation.
+
+        Returns:
+            Iterable[InlineModelAdmin]: An iterable of InlineModelAdmin classes.
+        """
+        return (
+            *super().inlines,
+            cast(
+                FieldsetItemsInline,
+                type(
+                    "FieldsetItemsInline",
+                    (FieldsetItemsInline,),
+                    {
+                        "model": self.model._flexible_model_for(
+                            FieldsetItemsInline.model
+                        ),
+                    },
+                ),
+            ),
+        )
+
+
 class FormsAdmin(ModelAdmin):
     """An admin configuration for managing flexible forms."""
 
     class Meta:
         pass
 
-    formfield_overrides = {
-        models.TextField: {
-            "widget": forms.widgets.TextInput(
-                attrs={
-                    "size": "50",
-                },
-            ),
-        },
-    }
+    formfield_overrides = DEFAULT_FORMFIELD_OVERRIDES
 
     list_display = ("label", "_fields_count", "_records_count", "_add_record")
 
@@ -130,7 +189,15 @@ class FormsAdmin(ModelAdmin):
                 type(
                     "FieldsInline",
                     (FieldsInline,),
-                    {"model": self.model._flexible_model_for(BaseField)},
+                    {"model": self.model._flexible_model_for(FieldsInline.model)},
+                ),
+            ),
+            cast(
+                FieldsetsInline,
+                type(
+                    "FieldsetsInline",
+                    (FieldsetsInline,),
+                    {"model": self.model._flexible_model_for(FieldsetsInline.model)},
                 ),
             ),
         )
@@ -241,6 +308,25 @@ class RecordsAdmin(admin.ModelAdmin):
             .prefetch_related("_form__fields__modifiers", "_attributes__field")
         )
 
+    def get_fieldsets(
+        self,
+        request: HttpRequest,
+        obj: Optional[models.Model] = None,
+    ) -> List[Tuple[Optional[str], Dict[str, Any]]]:
+        """Return the fieldset configuration for the form.
+
+        If the form has a fieldset configuration, use it instead of the
+        default.
+        """
+        default_fieldsets = super().get_fieldsets(request, obj)
+
+        if obj is None:
+            return default_fieldsets
+
+        # If the record's form specifies a fieldsets configuration, use it.
+        # Otherwise, default to Django admin behavior.
+        return cast("BaseRecord", obj)._form.as_django_fieldsets() or default_fieldsets
+
     def get_form(
         self,
         request: HttpRequest,
@@ -263,10 +349,9 @@ class RecordsAdmin(admin.ModelAdmin):
         """
         if obj:
             return type(
-                obj._form.as_django_form(
+                obj.as_django_form(
                     request.POST,
                     request.FILES,
-                    instance=obj,
                 )
             )
 

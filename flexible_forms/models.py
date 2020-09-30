@@ -5,6 +5,7 @@
 import inspect
 import logging
 import weakref
+from itertools import groupby
 from types import ModuleType
 from typing import (
     TYPE_CHECKING,
@@ -14,7 +15,9 @@ from typing import (
     Mapping,
     MutableMapping,
     Optional,
+    Sequence,
     Set,
+    Tuple,
     Type,
     TypeVar,
     Union,
@@ -25,6 +28,7 @@ from django import forms
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models, transaction
+from django.db.models import OrderWrt
 from django.db.models.manager import BaseManager
 from django.db.models.query import Prefetch
 from django.forms.widgets import Widget
@@ -52,6 +56,8 @@ FlexibleModel = Union[
     "BaseForm",
     "BaseField",
     "BaseFieldModifier",
+    "BaseFieldset",
+    "BaseFieldsetItem",
     "BaseRecord",
     "BaseRecordAttribute",
 ]
@@ -115,6 +121,7 @@ class BaseForm(FlexibleBaseModel):
 
     # Type hints for inbound relationships.
     fields: "BaseManager[BaseField]"
+    fieldsets: "BaseManager[BaseFieldset]"
     records: "BaseManager[BaseRecord]"
 
     class Meta:
@@ -148,6 +155,63 @@ class BaseForm(FlexibleBaseModel):
                 "_form": [self],
             }
         )
+
+    def as_django_fieldsets(
+        self,
+    ) -> List[Tuple[Optional[str], Dict[str, Any]]]:
+        """Generate a Django fieldsets configuration for the form.
+
+        The Django admin supports the specification of fieldsets -- a
+        simple way of grouping fields together. This property builds
+        """
+        django_fieldsets: List[Tuple[Optional[str], Dict[str, Any]]] = []
+        fieldsets = sorted(self.fieldsets.all(), key=lambda f: f._order)
+
+        seen_fields = set()
+        for fieldset in fieldsets:
+            fieldset_items: Union[Tuple, Tuple[Union[Sequence[str], str]]] = ()
+
+            # Sort the fieldset items by their vertical order, then group them
+            # by that order. This creates "rows" of items that have the same
+            # vertical_order.
+            vertically_sorted_items = sorted(
+                fieldset.items.all(), key=lambda f: int(f.vertical_order)
+            )
+            vertical_groups = groupby(
+                vertically_sorted_items,
+                lambda f: int(f.vertical_order),
+            )
+
+            # For each of the vertical groups that were created, sort them by
+            # their horizontal_order. This sets their horizontal display order
+            # so that items with a lower horizontal order are displayed first.
+            for _order, vertical_group in vertical_groups:
+                sorted_group = [
+                    i.field.name
+                    for i in sorted(
+                        vertical_group, key=lambda i: int(i.horizontal_order)
+                    )
+                ]
+                seen_fields.update(sorted_group)
+                fieldset_items = (
+                    *fieldset_items,
+                    tuple(sorted_group) if len(sorted_group) > 1 else sorted_group[0],
+                )
+
+            # Add the configured fieldset to the rest of them.
+            django_fieldsets = [
+                *django_fieldsets,
+                (
+                    fieldset.name or None,
+                    {
+                        "classes": tuple(filter(bool, fieldset.classes.split(" "))),
+                        "description": fieldset.description or None,
+                        "fields": fieldset_items,
+                    },
+                ),
+            ]
+
+        return django_fieldsets
 
     def as_django_form(
         self,
@@ -311,11 +375,11 @@ class BaseField(FlexibleBaseModel):
 
     # The `form` is set by the implementing class.
     form: models.ForeignKey
+    _order: int
 
     class Meta:
         abstract = True
         unique_together = ("form", "name")
-        order_with_respect_to = "name"
 
     def __str__(self) -> str:
         return self.label or "New Field"
@@ -536,6 +600,8 @@ class RecordManager(models.Manager):
                 .prefetch_related(
                     "_form__fields",
                     "_form__fields__modifiers",
+                    "_form__fieldsets",
+                    "_form__fieldsets__items",
                     Prefetch(
                         "_attributes",
                         queryset=RecordAttribute.objects.select_related("field"),
@@ -543,6 +609,57 @@ class RecordManager(models.Manager):
                 )
             ),
         )
+
+
+class BaseFieldset(FlexibleBaseModel):
+    """A section of Fields within a Form."""
+
+    form: BaseForm
+    items: "BaseManager[BaseFieldsetItem]"
+    _order: int
+
+    name = models.TextField(
+        blank=True,
+        default="",
+        help_text="The heading to be used for the fieldset. If left empty, no heading will appear.",
+    )
+    description = models.TextField(
+        blank=True, default="", help_text="The description of the fieldset."
+    )
+    classes = models.TextField(
+        blank=True,
+        default="",
+        help_text="CSS classes to be be applied to the fieldset when rendered.",
+    )
+
+    class Meta:
+        abstract = True
+
+
+class BaseFieldsetItem(FlexibleBaseModel):
+    """A single item within a Fieldset."""
+
+    fieldset: BaseFieldset
+    field: BaseField
+    _order: int
+
+    vertical_order = models.IntegerField(
+        help_text=(
+            "The vertical order of the item within the fieldset. Items with a lower "
+            "vertical order are displayed first. Items with the same vertical order "
+            "will be displayed on the same line."
+        )
+    )
+    horizontal_order = models.IntegerField(
+        help_text=(
+            "The horizontal order of the item within its vertical position. Items "
+            "with a lower order are displayed first."
+        )
+    )
+
+    class Meta:
+        abstract = True
+        unique_together = ("fieldset", "vertical_order", "horizontal_order")
 
 
 class BaseRecord(FlexibleBaseModel):
@@ -921,6 +1038,8 @@ class FlexibleForms:
     form_model: Optional[Type[BaseForm]] = None
     field_model: Optional[Type[BaseField]] = None
     field_modifier_model: Optional[Type[BaseFieldModifier]] = None
+    fieldset_model: Optional[Type[BaseFieldset]] = None
+    fieldset_item_model: Optional[Type[BaseFieldsetItem]] = None
     record_model: Optional[Type[BaseRecord]] = None
     record_attribute_model: Optional[Type[BaseRecordAttribute]] = None
 
@@ -956,6 +1075,10 @@ class FlexibleForms:
         self.field_modifier_model = self._make_field_modifier_model(
             field_model=self.field_model
         )
+        self.fieldset_model = self._make_fieldset_model(form_model=self.form_model)
+        self.fieldset_item_model = self._make_fieldset_item_model(
+            fieldset_model=self.fieldset_model, field_model=self.field_model
+        )
         self.record_model = self._make_record_model(form_model=self.form_model)
         self.record_attribute_model = self._make_record_attribute_model(
             record_model=self.record_model, field_model=self.field_model
@@ -967,6 +1090,8 @@ class FlexibleForms:
         model_map = {
             BaseForm: self.form_model,
             BaseField: self.field_model,
+            BaseFieldset: self.fieldset_model,
+            BaseFieldsetItem: self.fieldset_item_model,
             BaseFieldModifier: self.field_modifier_model,
             BaseRecord: self.record_model,
             BaseRecordAttribute: self.record_attribute_model,
@@ -1000,6 +1125,10 @@ class FlexibleForms:
             self.field_model = model
         elif issubclass(model, BaseFieldModifier):
             self.field_modifier_model = model
+        elif issubclass(model, BaseFieldset):
+            self.fieldset_model = model
+        elif issubclass(model, BaseFieldsetItem):
+            self.fieldset_item_model = model
         elif issubclass(model, BaseRecord):
             self.record_model = model
         elif issubclass(model, BaseRecordAttribute):
@@ -1028,16 +1157,75 @@ class FlexibleForms:
             Type[BaseField]: The prepared Field class.
         """
         field_model = self.field_model or self._default_model(BaseField)
-        field_model.add_to_class(  # type: ignore
-            "form",
-            models.ForeignKey(
-                form_model,
-                on_delete=models.CASCADE,
-                related_name="fields",
-                editable=False,
-            ),
+        form_field: "models.ForeignKey[BaseForm, BaseForm]" = models.ForeignKey(
+            form_model,
+            name="form",
+            on_delete=models.CASCADE,
+            related_name="fields",
+            editable=False,
         )
+        field_model.add_to_class(form_field.name, form_field)  # type: ignore
+        field_model = self._inject_orderwrt(field_model, form_field)
         return field_model
+
+    def _make_fieldset_model(self, form_model: Type[BaseForm]) -> Type[BaseFieldset]:
+        """Prepare the Fieldset model.
+
+        Args:
+            form_model: The model to use when building the "form" foreign key association.
+
+        Returns:
+            Type[BaseFieldset]: The prepared Fieldset class.
+        """
+        fieldset_model = self.fieldset_model or self._default_model(BaseFieldset)
+        form_field: "models.ForeignKey[BaseForm, BaseForm]" = models.ForeignKey(
+            form_model,
+            name="form",
+            on_delete=models.CASCADE,
+            related_name="fieldsets",
+            editable=False,
+        )
+        fieldset_model.add_to_class(form_field.name, form_field)  # type: ignore
+        fieldset_model = self._inject_orderwrt(fieldset_model, form_field)
+        return fieldset_model
+
+    def _make_fieldset_item_model(
+        self, fieldset_model: Type[BaseFieldset], field_model: Type[BaseField]
+    ) -> Type[BaseFieldsetItem]:
+        """Prepare the FieldsetItem model.
+
+        Args:
+            fieldset_model: The model to use when building the "fieldset" foreign key association.
+            field_model: The model to use when building the "field" foreign key association.
+
+        Returns:
+            Type[BaseFieldsetItem]: The prepared FieldsetItem class.
+        """
+        fieldset_item_model = self.fieldset_item_model or self._default_model(
+            BaseFieldsetItem
+        )
+        fieldset_field: "models.ForeignKey[BaseFieldset, BaseFieldset]" = (
+            models.ForeignKey(
+                fieldset_model,
+                name="fieldset",
+                on_delete=models.CASCADE,
+                related_name="items",
+            )
+        )
+        fieldset_item_model.add_to_class(fieldset_field.name, fieldset_field)  # type: ignore
+        field_field: "models.OneToOneField[BaseField, BaseField]" = (
+            models.OneToOneField(
+                field_model,
+                name="field",
+                on_delete=models.CASCADE,
+                related_name="fieldset_item",
+            )
+        )
+        fieldset_item_model.add_to_class(field_field.name, field_field)  # type: ignore
+
+        fieldset_item_model = self._inject_orderwrt(fieldset_item_model, fieldset_field)
+
+        return fieldset_item_model
 
     def _make_field_modifier_model(
         self, field_model: Type[BaseField]
@@ -1053,15 +1241,13 @@ class FlexibleForms:
         field_modifier_model = self.field_modifier_model or self._default_model(
             BaseFieldModifier
         )
-        field_modifier_model.add_to_class(  # type: ignore
-            "field",
-            models.ForeignKey(
-                field_model,
-                on_delete=models.CASCADE,
-                related_name="modifiers",
-                editable=False,
-            ),
+        field_field: "models.ForeignKey[BaseField, BaseField]" = models.ForeignKey(
+            field_model,
+            on_delete=models.CASCADE,
+            related_name="modifiers",
+            editable=False,
         )
+        field_modifier_model.add_to_class("field", field_field)  # type: ignore
         return field_modifier_model
 
     def _make_record_model(self, form_model: Type[BaseForm]) -> Type[BaseRecord]:
@@ -1074,14 +1260,13 @@ class FlexibleForms:
             Type[BaseRecord]: The prepared Record model.
         """
         record_model = self.record_model or self._default_model(BaseRecord)
-        record_model.add_to_class(  # type: ignore
-            "_form",
-            models.ForeignKey(
-                form_model,
-                on_delete=models.CASCADE,
-                related_name="records",
-            ),
+        _form_field: "models.ForeignKey[BaseForm, BaseForm]" = models.ForeignKey(
+            form_model,
+            on_delete=models.CASCADE,
+            related_name="records",
         )
+        record_model.add_to_class("_form", _form_field)  # type: ignore
+
         return record_model
 
     def _make_record_attribute_model(
@@ -1099,24 +1284,22 @@ class FlexibleForms:
         record_attribute_model = self.record_attribute_model or self._default_model(
             BaseRecordAttribute
         )
-        record_attribute_model.add_to_class(  # type: ignore
-            "record",
-            models.ForeignKey(
-                record_model,
-                on_delete=models.CASCADE,
-                related_name="_attributes",
-                editable=False,
-            ),
+        record_field: "models.ForeignKey[BaseRecord, BaseRecord]" = models.ForeignKey(
+            record_model,
+            on_delete=models.CASCADE,
+            related_name="_attributes",
+            editable=False,
         )
-        record_attribute_model.add_to_class(  # type: ignore
-            "field",
-            models.ForeignKey(
-                field_model,
-                on_delete=models.CASCADE,
-                related_name="attributes",
-                editable=False,
-            ),
+        record_attribute_model.add_to_class("record", record_field)  # type: ignore
+
+        field_field: "models.ForeignKey[BaseField, BaseField]" = models.ForeignKey(
+            field_model,
+            on_delete=models.CASCADE,
+            related_name="attributes",
+            editable=False,
         )
+        record_attribute_model.add_to_class("field", field_field)  # type: ignore
+
         return record_attribute_model
 
     def _default_model(self, base_model: Type[T]) -> Type[T]:
@@ -1136,6 +1319,22 @@ class FlexibleForms:
             (base_model,),
             {"__module__": self.module},
         )
+
+    def _inject_orderwrt(self, model: Type[T], field: models.Field) -> Type[T]:
+        """Inject the OrderWrt attribute for the given model and field.
+
+        Args:
+            model: The model class to inject _order for.
+            field: The model field that should be used an a reference point for _order.
+
+        Returns:
+            Type[T]: The given model with its new _order field.
+        """
+        model._meta.order_with_respect_to = field  # type: ignore
+        model._meta.ordering = ("_order",)  # type: ignore
+        model.add_to_class("_order", OrderWrt())  # type: ignore
+
+        return model
 
     @staticmethod
     def _check_finalized(flexible_forms: "FlexibleForms") -> None:

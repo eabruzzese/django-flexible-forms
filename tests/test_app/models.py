@@ -8,6 +8,8 @@ from django.db import models
 from flexible_forms.models import (
     BaseField,
     BaseFieldModifier,
+    BaseFieldset,
+    BaseFieldsetItem,
     BaseForm,
     BaseRecord,
     BaseRecordAttribute,
@@ -47,6 +49,16 @@ class AppField(BaseField, CustomBaseModel):
 
     class Meta(BaseField.Meta):
         unique_together = ("form", "name", "label")
+
+
+@app_forms
+class AppFieldset(BaseFieldset, CustomBaseModel):
+    """A customized version of the Fieldset provided by flexible_forms."""
+
+
+@app_forms
+class AppFieldsetItem(BaseFieldsetItem, CustomBaseModel):
+    """A customized version of the FieldsetItem provided by flexible_forms."""
 
 
 @app_forms

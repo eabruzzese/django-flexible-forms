@@ -12,7 +12,7 @@ from django import forms
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.files.base import File
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import models
+from django.db import IntegrityError, models
 from django.forms.widgets import HiddenInput, Select, Textarea, TextInput
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
@@ -22,6 +22,7 @@ from test_app.tests.factories import FieldFactory, FormFactory
 
 from flexible_forms.fields import (
     FIELD_TYPES,
+    DateTimeField,
     FileUploadField,
     IntegerField,
     MultiLineTextField,
@@ -177,6 +178,107 @@ def test_field_modifier() -> None:
     # exception message.
     assert "'>' not supported between instances of 'str' and 'int'" in str(ex)
     assert "expression is invalid" in str(ex)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_fieldset() -> None:
+    """Ensure that Django fieldsets can be produced for a Form."""
+    form = FormFactory(label="Fieldsets Test")
+
+    first_name_field = FieldFactory(
+        form=form,
+        label="First name",
+        name="first_name",
+        field_type=SingleLineTextField.name(),
+    )
+    last_name_field = FieldFactory(
+        form=form,
+        label="Last name",
+        name="last_name",
+        field_type=SingleLineTextField.name(),
+    )
+
+    birth_date_field = FieldFactory(
+        form=form,
+        label="Birth date",
+        name="birth_date",
+        field_type=DateTimeField.name(),
+    )
+
+    avatar_field = FieldFactory(
+        form=form, label="Avatar", name="avatar", field_type=FileUploadField.name()
+    )
+
+    bio_field = FieldFactory(
+        form=form, label="Bio", name="bio", field_type=MultiLineTextField.name()
+    )
+
+    # A form with no fieldsets should return an empty list for as_django_fieldsets().
+    assert form.as_django_fieldsets() == []
+
+    # Create a fieldset for collecting basic info. It should have no header or description.
+    basic_fieldset = form.fieldsets.create()
+
+    # First and last name should appear on the same line within the fieldset.
+    basic_fieldset.items.create(
+        field=first_name_field, vertical_order=0, horizontal_order=0
+    )
+    basic_fieldset.items.create(
+        field=last_name_field, vertical_order=0, horizontal_order=1
+    )
+    # Birth date should appear on its own line. Horizontal and vertical order
+    # should act as a (weight as opposed to an index), so higher numbers in
+    # either field should not result in gaps or empty elements in the rendered
+    # fieldsets.
+    basic_fieldset.items.create(
+        field=birth_date_field, vertical_order=10, horizontal_order=10
+    )
+
+    # Create a fieldset for collecting profile info. It should have a header,
+    # description, and CSS class names that will be split on spaces.
+    profile_fieldset = form.fieldsets.create(
+        name="Profile", description="Profile info", classes="profile collapse"
+    )
+
+    profile_fieldset.items.create(
+        field=avatar_field, vertical_order=0, horizontal_order=0
+    )
+
+    # Trying to put a field in the same slot as another field should raise an error.
+    with pytest.raises(IntegrityError):
+        profile_fieldset.items.create(
+            field=bio_field, vertical_order=0, horizontal_order=0
+        )
+
+    profile_fieldset.items.create(field=bio_field, vertical_order=1, horizontal_order=1)
+
+    assert form.as_django_fieldsets() == [
+        # The basic fieldset should come first and have no heading, classes, or description.
+        (
+            None,
+            {
+                "classes": (),
+                "description": None,
+                "fields": (
+                    # The first and last name fields should be grouped together.
+                    ("first_name", "last_name"),
+                    # The birth date field should be on its own line,
+                    # unwrapped, with no gaps or empty elements from the higher
+                    # vertical and horizontal order numbers.
+                    "birth_date",
+                ),
+            },
+        ),
+        # The profile fieldset should come last and have appropriate metadata values.
+        (
+            "Profile",
+            {
+                "classes": ("profile", "collapse"),
+                "description": "Profile info",
+                "fields": ("avatar", "bio"),
+            },
+        ),
+    ]
 
 
 @pytest.mark.django_db
@@ -606,12 +708,13 @@ def test_record_queries(django_assert_num_queries) -> None:
     # perspective of Record instances (which is what most implementations will
     # be interacting with most of the time in e.g. views):
     #
-    #   * One to fetch the list of records; this should include a prefetch of its _form.
-    #   * One to fetch the list of field modifiers for the fields on the _form.
-    #   * One to fetch the list of _attributes for all of the records.
-    #   * One to fetch the list of fields for all of the attributes.
+    #   1. One to fetch the list of records; this should include a prefetch of its _form.
+    #   2. One to fetch the list of the fields on the record's _form.
+    #   3. One to fetch the list of field modifiers fields on the record's _form.
+    #   4. One to fetch the list of fieldsets for each record's _form.
+    #   5. One to fetch the list of _attributes for all of the records.
     #
-    with django_assert_num_queries(4):
+    with django_assert_num_queries(5):
         records = list(AppRecord.objects.all())
 
     # Fetching the data from any of the records should not require any
