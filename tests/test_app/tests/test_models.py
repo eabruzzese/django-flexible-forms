@@ -219,6 +219,9 @@ def test_fieldset() -> None:
     # Create a fieldset for collecting basic info. It should have no header or description.
     basic_fieldset = form.fieldsets.create()
 
+    # The fieldset should have a friendly name that includes its ID in __str__.
+    assert str(basic_fieldset.pk) in str(basic_fieldset)
+
     # First and last name should appear on the same line within the fieldset.
     basic_fieldset.items.create(
         field=first_name_field, vertical_order=0, horizontal_order=0
@@ -250,7 +253,12 @@ def test_fieldset() -> None:
             field=bio_field, vertical_order=0, horizontal_order=0
         )
 
-    profile_fieldset.items.create(field=bio_field, vertical_order=1, horizontal_order=1)
+    fieldset_item = profile_fieldset.items.create(
+        field=bio_field, vertical_order=1, horizontal_order=1
+    )
+
+    # The fieldset should have a friendly name that includes its ID in __str__.
+    assert str(fieldset_item.pk) in str(fieldset_item)
 
     assert form.as_django_fieldsets() == [
         # The basic fieldset should come first and have no heading, classes, or description.
@@ -559,7 +567,6 @@ def test_record(
             name=f"{field_type}_field",
             field_type=field_type,
             required=True,
-            _order=1,
         )
         for field_type in FIELD_TYPES.keys()
     )

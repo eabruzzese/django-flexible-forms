@@ -28,7 +28,6 @@ from django import forms
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models, transaction
-from django.db.models import OrderWrt
 from django.db.models.manager import BaseManager
 from django.db.models.query import Prefetch
 from django.forms.widgets import Widget
@@ -165,7 +164,7 @@ class BaseForm(FlexibleBaseModel):
         simple way of grouping fields together. This property builds
         """
         django_fieldsets: List[Tuple[Optional[str], Dict[str, Any]]] = []
-        fieldsets = sorted(self.fieldsets.all(), key=lambda f: f._order)
+        fieldsets = self.fieldsets.all()
 
         seen_fields = set()
         for fieldset in fieldsets:
@@ -375,7 +374,6 @@ class BaseField(FlexibleBaseModel):
 
     # The `form` is set by the implementing class.
     form: models.ForeignKey
-    _order: int
 
     class Meta:
         abstract = True
@@ -616,7 +614,6 @@ class BaseFieldset(FlexibleBaseModel):
 
     form: BaseForm
     items: "BaseManager[BaseFieldsetItem]"
-    _order: int
 
     name = models.TextField(
         blank=True,
@@ -635,13 +632,17 @@ class BaseFieldset(FlexibleBaseModel):
     class Meta:
         abstract = True
 
+    def __str__(self) -> str:
+        return f"Fieldset {self.name} ({self.pk})"
+
 
 class BaseFieldsetItem(FlexibleBaseModel):
     """A single item within a Fieldset."""
 
     fieldset: BaseFieldset
+    fieldset_id: int
     field: BaseField
-    _order: int
+    field_id: int
 
     vertical_order = models.IntegerField(
         help_text=(
@@ -660,6 +661,9 @@ class BaseFieldsetItem(FlexibleBaseModel):
     class Meta:
         abstract = True
         unique_together = ("fieldset", "vertical_order", "horizontal_order")
+
+    def __str__(self) -> str:
+        return f"Fieldset item {self.pk} for field {self.field_id}"
 
 
 class BaseRecord(FlexibleBaseModel):
@@ -1165,7 +1169,7 @@ class FlexibleForms:
             editable=False,
         )
         field_model.add_to_class(form_field.name, form_field)  # type: ignore
-        field_model = self._inject_orderwrt(field_model, form_field)
+
         return field_model
 
     def _make_fieldset_model(self, form_model: Type[BaseForm]) -> Type[BaseFieldset]:
@@ -1186,7 +1190,7 @@ class FlexibleForms:
             editable=False,
         )
         fieldset_model.add_to_class(form_field.name, form_field)  # type: ignore
-        fieldset_model = self._inject_orderwrt(fieldset_model, form_field)
+
         return fieldset_model
 
     def _make_fieldset_item_model(
@@ -1223,8 +1227,6 @@ class FlexibleForms:
         )
         fieldset_item_model.add_to_class(field_field.name, field_field)  # type: ignore
 
-        fieldset_item_model = self._inject_orderwrt(fieldset_item_model, fieldset_field)
-
         return fieldset_item_model
 
     def _make_field_modifier_model(
@@ -1248,6 +1250,7 @@ class FlexibleForms:
             editable=False,
         )
         field_modifier_model.add_to_class("field", field_field)  # type: ignore
+
         return field_modifier_model
 
     def _make_record_model(self, form_model: Type[BaseForm]) -> Type[BaseRecord]:
@@ -1319,22 +1322,6 @@ class FlexibleForms:
             (base_model,),
             {"__module__": self.module},
         )
-
-    def _inject_orderwrt(self, model: Type[T], field: models.Field) -> Type[T]:
-        """Inject the OrderWrt attribute for the given model and field.
-
-        Args:
-            model: The model class to inject _order for.
-            field: The model field that should be used an a reference point for _order.
-
-        Returns:
-            Type[T]: The given model with its new _order field.
-        """
-        model._meta.order_with_respect_to = field  # type: ignore
-        model._meta.ordering = ("_order",)  # type: ignore
-        model.add_to_class("_order", OrderWrt())  # type: ignore
-
-        return model
 
     @staticmethod
     def _check_finalized(flexible_forms: "FlexibleForms") -> None:

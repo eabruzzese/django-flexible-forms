@@ -47,9 +47,6 @@ class AppForm(BaseForm, CustomBaseModel):
 class AppField(BaseField, CustomBaseModel):
     """A customized version of the Field provided by flexible_forms."""
 
-    class Meta(BaseField.Meta):
-        unique_together = ("form", "name", "label")
-
 
 @app_forms
 class AppFieldset(BaseFieldset, CustomBaseModel):

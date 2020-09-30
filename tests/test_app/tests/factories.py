@@ -21,7 +21,6 @@ class FieldFactory(factory.django.DjangoModelFactory):
     )
     required = False
     label = factory.Faker("sentence")
-    _order = factory.Sequence(lambda n: n)
 
 
 class FormFactory(factory.django.DjangoModelFactory):
