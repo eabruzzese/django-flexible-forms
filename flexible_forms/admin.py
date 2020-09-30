@@ -3,7 +3,7 @@
 """Django admin configurations for flexible_forms."""
 
 import logging
-from typing import Any, Iterable, Optional, Type, cast
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, cast
 
 from django import forms
 from django.conf import settings
@@ -102,16 +102,33 @@ class FieldsetItemsInline(TabularInline):
 
     formfield_overrides = DEFAULT_FORMFIELD_OVERRIDES
 
-    def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        form_id = request.resolver_match.kwargs.get("object_id")
+    def formfield_for_foreignkey(
+        self, db_field: models.Field, request: HttpRequest, **kwargs: Any
+    ) -> forms.Field:
+        """Modify ForeignKey fields before they're rendered to the form.
+
+        Restricts the "field" choices to only include Fields for the current
+        Form.
+
+        Args:
+            db_field: The model field to be rendered to the form.
+            request: The current HTTP request.
+            kwargs: Passed to super.
+
+        Returns:
+            forms.Field: A configured form field for the given db_field.
+        """
         if db_field.name == "field":
+            form_id = request.resolver_match.kwargs.get("object_id")
             Field = self.model._flexible_model_for(BaseField)
             kwargs["queryset"] = (
                 Field._default_manager.filter(form=form_id)
                 if form_id
                 else Field._default_manager.none()
             )
-        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+        return cast(
+            forms.Field, super().formfield_for_foreignkey(db_field, request, **kwargs)
+        )
 
 
 class FieldsetsInline(StackedInline):
@@ -294,21 +311,21 @@ class RecordsAdmin(admin.ModelAdmin):
     def get_fieldsets(
         self,
         request: HttpRequest,
-        obj: Optional["BaseRecord"] = None,
-        *args: Any,
-        **kwargs: Any,
-    ) -> Type[forms.BaseForm]:
+        obj: Optional[models.Model] = None,
+    ) -> List[Tuple[Optional[str], Dict[str, Any]]]:
         """Return the fieldset configuration for the form.
 
-        If the form has a fieldset configuration, use it instead of the default.
+        If the form has a fieldset configuration, use it instead of the
+        default.
         """
-        fieldsets = super().get_fieldsets(request, obj, *args, **kwargs)
+        default_fieldsets = super().get_fieldsets(request, obj)
+
+        if obj is None:
+            return default_fieldsets
 
         # If the record's form specifies a fieldsets configuration, use it.
-        if obj and obj._form.django_fieldsets is not None:
-            fieldsets = obj._form.django_fieldsets
-
-        return fieldsets
+        # Otherwise, default to Django admin behavior.
+        return cast("BaseRecord", obj)._form.as_django_fieldsets() or default_fieldsets
 
     def get_form(
         self,

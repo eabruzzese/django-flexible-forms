@@ -10,13 +10,18 @@ from django.template.response import TemplateResponse
 from test_app.admin import AppFormsAdmin, AppRecordsAdmin
 from test_app.models import AppForm, AppRecord
 
-from flexible_forms.admin import FieldModifiersInline, FieldsInline
+from flexible_forms.admin import (
+    FieldModifiersInline,
+    FieldsetItemsInline,
+    FieldsetsInline,
+    FieldsInline,
+)
 
 from .factories import FieldFactory, FormFactory
 
 
 @pytest.mark.django_db
-def test_form_admin(django_assert_num_queries: Any) -> None:
+def test_form_admin(django_assert_num_queries: Any, mocker: Any) -> None:
     """Ensure that the ModelAdmin for forms renders as expected."""
 
     forms_admin = AppFormsAdmin(model=AppForm, admin_site=AdminSite())
@@ -29,6 +34,10 @@ def test_form_admin(django_assert_num_queries: Any) -> None:
     # Generate a form.
     test_form = FormFactory(label="Test Form")
     test_field = FieldFactory(form=test_form)
+    test_fieldset = test_form.fieldsets.create(name="Test Fieldset")
+    test_fieldset_item = test_fieldset.items.create(
+        field=test_field, vertical_order=0, horizontal_order=0
+    )
 
     with django_assert_num_queries(1):
         queryset = forms_admin.get_queryset(request=request)
@@ -57,6 +66,43 @@ def test_form_admin(django_assert_num_queries: Any) -> None:
     )
     assert field_modifiers_inline is not None
 
+    # The forms admin should also have an inline for fieldsets.
+    fieldsets_inline = next(
+        (i for i in forms_admin.inlines if issubclass(i, FieldsetsInline)), None
+    )
+    assert fieldsets_inline is not None
+
+    # The formsets inline should also have an inline for fieldset items.
+    fieldsets_inline = fieldsets_inline(forms_admin.model, forms_admin.admin_site)
+    fieldset_items_inline = next(
+        (i for i in fieldsets_inline.inlines if issubclass(i, FieldsetItemsInline)),
+        None,
+    )
+    assert fieldset_items_inline is not None
+
+    # Fieldset items should have their "field" choices restricted to fields in the current form.
+    fieldset_items_inline = fieldset_items_inline(
+        forms_admin.model, forms_admin.admin_site
+    )
+    # In order to restrict the queryset, the formfield_for_foreignkey method
+    # needs access to the request's resolver_match property so that it can get
+    # the object_id out of the matched path for the application route.
+    mock_request = mocker.Mock()
+    mock_request.resolver_match.kwargs = {"object_id": test_form.pk}
+    formfield_for_field_fk = fieldset_items_inline.formfield_for_foreignkey(
+        db_field=test_fieldset_item._meta.get_field("field"), request=mock_request
+    )
+    assert set(formfield_for_field_fk.queryset.all()) == set(test_form.fields.all())
+
+    # The fieldset foreign key should remain untouched.
+    fieldset_fk = test_fieldset_item._meta.get_field("fieldset")
+    formfield_for_fieldset_fk = fieldset_items_inline.formfield_for_foreignkey(
+        db_field=fieldset_fk, request=mock_request
+    )
+    assert str(formfield_for_fieldset_fk.queryset.query) == str(
+        fieldset_fk.formfield().queryset.query
+    )
+
 
 @pytest.mark.django_db
 def test_record_admin(django_assert_num_queries: Any) -> None:
@@ -72,6 +118,8 @@ def test_record_admin(django_assert_num_queries: Any) -> None:
     # Generate a form so we can create records.
     test_form = FormFactory(label="Test Form")
     test_field = FieldFactory(form=test_form, required=False)
+    test_fieldset = test_form.fieldsets.create(name="Test Fieldset")
+    test_fieldset.items.create(field=test_field, vertical_order=0, horizontal_order=0)
 
     # The admin list view should only run a minimal number of queries to fetch
     # its listing.
@@ -118,3 +166,8 @@ def test_record_admin(django_assert_num_queries: Any) -> None:
     admin_form_fields = record_form().fields
     record_form_fields = added_record._form.as_django_form(instance=added_record).fields
     assert set(admin_form_fields.keys()) == set(record_form_fields.keys())
+
+    # If the form has defined fieldsets, they should be rendered instead of the defaults.
+    fieldsets = records_admin.get_fieldsets(request=request, obj=added_record)
+    assert len(fieldsets) == 1
+    assert fieldsets[0][0] == test_fieldset.name
