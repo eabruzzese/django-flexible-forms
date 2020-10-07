@@ -33,6 +33,8 @@ from flexible_forms.fields import (
 from flexible_forms.models import (
     BaseField,
     BaseFieldModifier,
+    BaseFieldset,
+    BaseFieldsetItem,
     BaseForm,
     BaseRecord,
     BaseRecordAttribute,
@@ -650,7 +652,11 @@ def test_disabled_validation() -> None:
     # Generate a field of every type and make them required.
     AppField.objects.bulk_create(
         FieldFactory.build(
-            form=form, name=f"{field_type}_field", field_type=field_type, required=True
+            form=form,
+            name=f"{field_type}_field",
+            field_type=field_type,
+            required=True,
+            _order=0,
         )
         for field_type in FIELD_TYPES.keys()
     )
@@ -688,7 +694,7 @@ def test_record_queries(django_assert_num_queries) -> None:
     for form in forms:
         AppField.objects.bulk_create(
             FieldFactory.build(
-                form=form, name=f"{field_type}_field", field_type=field_type
+                form=form, name=f"{field_type}_field", field_type=field_type, _order=0
             )
             for field_type in FIELD_TYPES.keys()
         )
@@ -768,88 +774,15 @@ def test_flexible_forms(mocker) -> None:
     """Ensure that the FlexibleForms construct behaves as expected."""
     test_ff = FlexibleForms(model_prefix="Test")
 
-    # All of the model slots should start out empty.
-    assert test_ff.form_model is None
-    assert test_ff.field_model is None
-    assert test_ff.field_modifier_model is None
-    assert test_ff.record_model is None
-    assert test_ff.record_attribute_model is None
-
-    # Models should be able to be decorated to have them assigned to an
-    # appropriate slot based on the flexible_forms base model they inherit
-    # from.
-    @test_ff
-    class TestForm(BaseForm):
-        pass
-
-    assert test_ff.form_model is TestForm
-
-    @test_ff
-    class TestField(BaseField):
-        pass
-
-    assert test_ff.field_model is TestField
-
-    @test_ff
-    class TestFieldModifier(BaseFieldModifier):
-        pass
-
-    assert test_ff.field_modifier_model is TestFieldModifier
-
-    @test_ff
-    class TestRecord(BaseRecord):
-        pass
-
-    assert test_ff.record_model is TestRecord
-
-    @test_ff
-    class TestRecordAttribute(BaseRecordAttribute):
-        pass
-
-    assert test_ff.record_attribute_model is TestRecordAttribute
-
-    # An error should be raised if the decorator is used on a class that
-    # doesn't inherit from a flexible_forms base model.
-    with pytest.raises(ValueError) as ex:
-
-        @test_ff
-        class BrokenModel:
-            pass
-
-    assert "BrokenModel" in str(ex)
-    assert "must implement one of" in str(ex)
-    assert "flexible_forms.models.Base" in str(ex)
-
-    # Leaving a slot empty should result in a model being automatically
-    # generated from the appropriate base class.
-    test_ff.finalized = False
-    test_ff.form_model = None
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore", message=r"Model [^\s]+ was already registered"
-        )
-        test_ff.make_flexible()
-    assert test_ff.form_model is not None
-
-    # A finalizer should be registered and called when the FlexibleForms object
-    # is garbage collected and raise an ImproperlyConfigured error if the user
-    # has not called make_flexible().
-    #
-    # The error message should include the model's module and a mention of the
-    # make_flexible call that's missing.
-    with pytest.raises(ImproperlyConfigured) as ex:
-        test_ff.finalized = False
-        test_ff._check_finalized(test_ff)
-    assert test_ff.module in str(ex)
-    assert "make_flexible" in str(ex)
-
-    # The finalizer should not be called if the user has called make_flexible
-    # on their FlexibleForms object.
-    test_ff.make_flexible()
-    test_ff._check_finalized(test_ff)
-
-    # The finalizer should be called whenever the FlexibleForms object gets
-    # garbage collected or destroyed.
-    finalizer = mocker.patch.object(test_ff, "_check_finalized")
-    del test_ff
-    assert finalizer.called_once()
+    for base_model in (
+        BaseForm,
+        BaseField,
+        BaseFieldset,
+        BaseFieldsetItem,
+        BaseFieldModifier,
+        BaseRecord,
+        BaseRecordAttribute,
+    ):
+        generated_base_model = getattr(test_ff, base_model.__name__)
+        assert issubclass(generated_base_model, base_model)
+        assert generated_base_model._flexible_forms is test_ff
