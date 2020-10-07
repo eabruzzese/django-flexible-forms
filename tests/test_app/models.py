@@ -5,16 +5,7 @@ import uuid
 
 from django.db import models
 
-from flexible_forms.models import (
-    BaseField,
-    BaseFieldModifier,
-    BaseFieldset,
-    BaseFieldsetItem,
-    BaseForm,
-    BaseRecord,
-    BaseRecordAttribute,
-    FlexibleForms,
-)
+from flexible_forms.models import FlexibleForms
 
 
 class CustomBaseModel(models.Model):

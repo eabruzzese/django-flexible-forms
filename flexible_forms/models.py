@@ -2,15 +2,11 @@
 
 """Model definitions for the flexible_forms module."""
 
-from collections import defaultdict
 import inspect
 import logging
-import types
-import weakref
 from itertools import groupby
 from types import ModuleType
 from typing import (
-    Callable,
     TYPE_CHECKING,
     Any,
     Dict,
@@ -32,7 +28,12 @@ from django.core.exceptions import FieldDoesNotExist, ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models, transaction
 from django.db.models.base import ModelBase
-from django.db.models.fields.related import ForeignObject
+from django.db.models.fields.mixins import FieldCacheMixin
+from django.db.models.fields.related import (
+    ForeignObject,
+    ForwardManyToOneDescriptor,
+    ReverseManyToOneDescriptor,
+)
 from django.db.models.options import Options
 from django.db.models.query import Prefetch
 from django.forms.widgets import Widget
@@ -56,19 +57,9 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:  # pragma: no cover
     from flexible_forms.forms import BaseRecordForm
 
-FlexibleModel = Union[
-    "BaseForm",
-    "BaseField",
-    "BaseFieldModifier",
-    "BaseFieldset",
-    "BaseFieldsetItem",
-    "BaseRecord",
-    "BaseRecordAttribute",
-]
-
 T = TypeVar(
     "T",
-    bound=FlexibleModel,
+    bound="FlexibleBaseModel",
 )
 
 ##
@@ -83,35 +74,46 @@ FIELD_TYPE_OPTIONS = sorted(
 )
 
 
-class FlexibleRelation(ForeignObject):
+class FlexibleRelation(ForeignObject, FieldCacheMixin):
     """A custom field for defining a swappable ForeignKey field for a model."""
 
-    _to_base_model: "FlexibleBaseModel"
+    related_accessor_class: Type[ReverseManyToOneDescriptor]
+    forward_related_accessor_class: Type[ForwardManyToOneDescriptor]
 
-    _original_field_name: Optional[str]
-    _original_related_name: Optional[str]
+    _to_base_model: Type["FlexibleBaseModel"]
+
+    _original_field_name: str
+    _original_related_name: str
     _original_args: Sequence[Any]
     _original_kwargs: Dict[str, Any]
 
+    _aliased_to: str
+
+    concrete: bool
+
     def __init__(
         self,
-        to: "FlexibleBaseModel",
-        *args,
-        related_name: Optional[str] = None,
+        to: Type["FlexibleBaseModel"],
+        *args: Any,
+        related_name: str,
         **kwargs: Any,
     ) -> None:
         self._to_base_model = to
         self._original_related_name = related_name
         self._original_args = args
-        self._original_kwargs = kwargs
+        self._original_kwargs = kwargs.copy()
 
-        super().__init__(to, *args, related_name=related_name, **kwargs)
+        kwargs["related_name"] = related_name
+
+        super().__init__(to, *args, **kwargs)
 
     def contribute_to_class(
-        self, cls: Type["FlexibleBaseModel"], name: str, private_only: bool = False
+        self, cls: Type[models.Model], name: str, private_only: bool = False
     ) -> None:
         if cls._meta.abstract or not hasattr(cls, "_flexible_forms"):
             return super().contribute_to_class(cls, name, private_only=private_only)
+
+        cls = cast(Type[FlexibleBaseModel], cls)
 
         self._original_field_name = name
 
@@ -131,8 +133,7 @@ class FlexibleRelation(ForeignObject):
         super().__init__(
             to_concrete_model,
             *self._original_args,
-            related_name=related_name,
-            **self._original_kwargs,
+            **{**self._original_kwargs, "related_name": related_name},
         )
         super().contribute_to_class(cls, field_name, private_only=private_only)
 
@@ -168,7 +169,7 @@ class FlexibleRelation(ForeignObject):
             setattr(
                 to_concrete_model,
                 self._original_related_name,
-                self.related_accessor_class(self.remote_field),
+                self.related_accessor_class(cast(FieldCacheMixin, self.remote_field)),
             )
 
     def get_cache_name(self) -> str:
@@ -188,7 +189,7 @@ class FlexibleRelation(ForeignObject):
     ) -> Options:
         # Replace any references to old field names in order_with_respect_to.
         meta.order_with_respect_to = (
-            to_field
+            to_field  # type: ignore
             if meta.order_with_respect_to == from_field
             else meta.order_with_respect_to
         )
@@ -237,21 +238,11 @@ class FlexibleMetaclass(ModelBase):
     """A metaclass for custom model definition behavior."""
 
     def __new__(
-        cls, name: str, bases: Union[Tuple, Tuple[Type[Any]]], attrs: Dict[str, Any]
-    ) -> Type[Any]:
-        cls, name, bases, attrs = cls._before_model_registration(
-            cls, name, bases, attrs
-        )
-
-        model_class = super().__new__(cls, name, bases, attrs)
-
-        model_class = cls._after_model_registration(cls, model_class)
-
-        return model_class
-
-    def _before_model_registration(
-        cls, name: str, bases: Union[Tuple, Tuple[Type[Any]]], attrs: Dict[str, Any]
-    ):
+        cls: Type["FlexibleMetaclass"],
+        name: str,
+        bases: Union[Tuple, Tuple[Type[Any]]],
+        attrs: Dict[str, Any],
+    ) -> "FlexibleMetaclass":
         Meta = attrs.get("Meta", None)
         abstract = getattr(Meta, "abstract", False)
 
@@ -260,37 +251,35 @@ class FlexibleMetaclass(ModelBase):
         if FlexibleMeta:
             attrs["_flexible_meta"] = FlexibleMeta()
 
-        # Abstract classes require no action, so we return early.
-        if abstract:
-            return cls, name, bases, attrs
+        # Copy the _flexible_forms reference to the attrs dict so that concrete
+        # implementations have access to it while they're being defined.
+        try:
+            flexible_base_model = cast(
+                Type["FlexibleBaseModel"],
+                next(base for base in bases if issubclass(base, FlexibleBaseModel)),
+            )
+            attrs["_flexible_forms"] = flexible_base_model._flexible_forms
+        except (NameError, StopIteration, AttributeError):
+            pass
 
-        # Resolve the flexible base model class that this concrete model
-        # inherits from so that we can get access to the FlexibleForms instance
-        # that's shared across this group of flexible models.
-        flexible_base_model = cls._get_flexible_base_model(cls, bases)
+        # Prepare the model class as usual.
+        model_class = cast(
+            Type["FlexibleBaseModel"], super().__new__(cls, name, bases, attrs)
+        )
 
-        attrs["_flexible_forms"] = flexible_base_model._flexible_forms
-
-        # Reconfigure relationship attributes so that they point to the
-        # appropriate concrete model.
-        # attrs = cls._reconfigure_relations(cls, name, attrs, flexible_base_model)
-
-        return cls, name, bases, attrs
-
-    def _after_model_registration(cls, model_class):
+        # If we've just prepared a concrete model, register it with the
+        # _flexible_forms instance attached to it.
         if not model_class._meta.abstract:
             model_class._flexible_forms.register_model(model_class)
 
         return model_class
 
-    def _get_flexible_base_model(cls, bases):
-        try:
-            return next(base for base in bases if issubclass(base, FlexibleBaseModel))
-        except NameError:
-            pass
 
-
-def _replace_element(needle, replacement, haystack):
+def _replace_element(
+    needle: Any,
+    replacement: Any,
+    haystack: Union[List[Any], Tuple[Any, ...]],
+) -> Union[List[Any], Tuple[Any, ...]]:
     elements = type(haystack)()
     for element in haystack:
         if isinstance(element, str):
@@ -308,8 +297,9 @@ class FlexibleBaseModel(models.Model, metaclass=FlexibleMetaclass):
         abstract = True
 
     _flexible_forms: "FlexibleForms"
+    _flexible_meta: Any
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         for field_name, value in tuple(kwargs.items()):
             try:
                 field = self._meta.get_field(field_name)
@@ -363,6 +353,10 @@ class BaseForm(FlexibleBaseModel):
         help_text="The human-friendly name of the form.",
     )
     description = models.TextField(blank=True, default="")
+
+    fields: "models.BaseManager[BaseField]"
+    fieldsets: "models.BaseManager[BaseFieldset]"
+    records: "models.BaseManager[BaseRecord]"
 
     class Meta:
         abstract = True
@@ -618,7 +612,16 @@ class BaseField(FlexibleBaseModel):
         encoder=DjangoJSONEncoder,
     )
 
-    form = FlexibleForeignKey(BaseForm, on_delete=models.CASCADE, related_name="fields")
+    form: "models.ForeignKey[BaseForm, BaseForm]" = FlexibleForeignKey(
+        BaseForm, on_delete=models.CASCADE, related_name="fields"
+    )
+    form_id: Optional[int]
+
+    fieldset_item: "models.OneToOneField[BaseFieldsetItem, BaseFieldsetItem]"
+    fieldset_item_id: Optional[int]
+
+    modifiers: "models.BaseManager[BaseFieldModifier]"
+    attributes: "models.BaseManager[BaseRecordAttribute]"
 
     class Meta:
         abstract = True
@@ -726,9 +729,11 @@ class BaseFieldModifier(FlexibleBaseModel):
     * Hiding a field until another field changes.
     """
 
-    field = FlexibleForeignKey(
+    field: "models.ForeignKey[BaseField, BaseField]" = FlexibleForeignKey(
         BaseField, on_delete=models.CASCADE, related_name="modifiers"
     )
+    field_id: Optional[int]
+
     attribute = models.TextField()
     expression = models.TextField()
 
@@ -843,9 +848,10 @@ class BaseFieldset(FlexibleBaseModel):
         help_text="CSS classes to be be applied to the fieldset when rendered.",
     )
 
-    form = FlexibleForeignKey(
+    form: "models.ForeignKey[BaseForm, BaseForm]" = FlexibleForeignKey(
         BaseForm, on_delete=models.CASCADE, related_name="fieldsets"
     )
+    items: "models.BaseManager[BaseFieldsetItem]"
 
     class Meta:
         abstract = True
@@ -861,12 +867,14 @@ class BaseFieldset(FlexibleBaseModel):
 class BaseFieldsetItem(FlexibleBaseModel):
     """A single item within a Fieldset."""
 
-    fieldset = FlexibleForeignKey(
+    fieldset: "models.ForeignKey[BaseFieldset, BaseFieldset]" = FlexibleForeignKey(
         BaseFieldset, on_delete=models.CASCADE, related_name="items"
     )
-    field = FlexibleOneToOneField(
+    fieldset_id: Optional[int]
+    field: "models.OneToOneField[BaseField, BaseField]" = FlexibleOneToOneField(
         BaseField, on_delete=models.CASCADE, related_name="fieldset_item"
     )
+    field_id: Optional[int]
 
     vertical_order = models.IntegerField(
         help_text=(
@@ -948,9 +956,11 @@ class BaseRecord(FlexibleBaseModel):
     names.
     """
 
-    _form = FlexibleForeignKey(
+    _form: "models.ForeignKey[BaseForm, BaseForm]" = FlexibleForeignKey(
         BaseForm, on_delete=models.CASCADE, related_name="records"
     )
+    _form_id: Optional[int]
+    _attributes: "models.BaseManager[BaseRecordAttribute]"
 
     objects = RecordManager()
 
@@ -1088,9 +1098,9 @@ class BaseRecord(FlexibleBaseModel):
             super().__setattr__(name, value)
             return
 
-        RecordAttribute = self._flexible_model_for(BaseRecordAttribute)
+        RecordAttribute = cast(Any, self._flexible_model_for(BaseRecordAttribute))
         self._staged_changes[name] = RecordAttribute(
-            record=self,  # type: ignore
+            record=self,
             field=self._fields[name],
             value=value,
         ).value
@@ -1116,7 +1126,7 @@ class BaseRecord(FlexibleBaseModel):
             return
 
         # Upsert the record attributes.
-        RecordAttribute = self._flexible_model_for(BaseRecordAttribute)
+        RecordAttribute = cast(Any, self._flexible_model_for(BaseRecordAttribute))
         attribute_map = {a.field.name: a for a in self._attributes.all()}
 
         value_fields: Set[str] = set()
@@ -1125,7 +1135,7 @@ class BaseRecord(FlexibleBaseModel):
         for field_name, value in self._staged_changes.items():
             # Find the existing attribute object or create a new one.
             attribute = attribute_map.get(field_name) or RecordAttribute(
-                record=self,  # type: ignore
+                record=self,
                 field=self._fields[field_name],
             )
 
@@ -1162,12 +1172,15 @@ class BaseRecordAttribute(FlexibleBaseModel):
     #
     _VALUE_FIELD_PREFIX = "_value_"
 
-    record = FlexibleForeignKey(
+    record: "models.ForeignKey[BaseRecord, BaseRecord]" = FlexibleForeignKey(
         BaseRecord, on_delete=models.CASCADE, related_name="_attributes"
     )
-    field = FlexibleForeignKey(
+    record_id: Optional[int]
+
+    field: "models.ForeignKey[BaseField, BaseField]" = FlexibleForeignKey(
         BaseField, on_delete=models.CASCADE, related_name="attributes"
     )
+    field_id: Optional[int]
 
     class Meta:
         abstract = True
@@ -1313,10 +1326,12 @@ class FlexibleForms:
     ```
     """
 
-    def __init__(self, model_prefix: str = None) -> None:
+    def __init__(self, model_prefix: Optional[str] = None) -> None:
         self.model_prefix = model_prefix or ""
         self.module = cast(ModuleType, inspect.getmodule(inspect.stack()[1][0]))
-        self.models: Dict[Type[T], Type[T]] = {}
+        self.models: Dict[
+            Union[Type[FlexibleBaseModel], str], Type[FlexibleBaseModel]
+        ] = {}
 
     def register_model(self, model_class: Type[FlexibleBaseModel]) -> None:
         """Register a concrete implementation of a flexible base model.
@@ -1333,7 +1348,6 @@ class FlexibleForms:
         """
         base_model = self._get_flexible_base_model(model_class)
         base_opts = base_model._meta
-        opts = model_class._meta
 
         self.models[base_model] = model_class
         self.models[f"{base_opts.app_label}.{base_opts.model_name}"] = model_class
@@ -1347,6 +1361,10 @@ class FlexibleForms:
             base_model: The base model for which to return the concrete model
                 implementation.
 
+        Raises:
+            LookupError: if no concrete model has been registered for the
+                given base yet.
+
         Returns:
             Type[FlexibleBaseModel]: The concrete model implementation for
                 the base model.
@@ -1358,7 +1376,9 @@ class FlexibleForms:
 
         return self.models[base_model]
 
-    def _get_flexible_base_model(self, model_class):
+    def _get_flexible_base_model(
+        self, model_class: Type["FlexibleBaseModel"]
+    ) -> Type["FlexibleBaseModel"]:
         flexible_bases = frozenset(FlexibleBaseModel.__subclasses__())
         for base in model_class.__bases__:
             try:
@@ -1369,6 +1389,10 @@ class FlexibleForms:
                 )
             except (NameError, StopIteration):
                 continue
+
+        raise ValueError(
+            f"{model_class.__name__} does not inherit from FlexibleBaseModel."
+        )
 
     @property
     def BaseForm(self) -> Type["BaseForm"]:

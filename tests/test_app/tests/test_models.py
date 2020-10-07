@@ -3,13 +3,12 @@
 """Tests for form-related models."""
 
 import hashlib
-import warnings
 from datetime import timedelta
 from typing import Sequence, cast
 
 import pytest
 from django import forms
-from django.core.exceptions import ImproperlyConfigured, ValidationError
+from django.core.exceptions import ValidationError
 from django.core.files.base import File
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, models
