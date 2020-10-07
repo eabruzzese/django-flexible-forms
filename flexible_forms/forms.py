@@ -6,7 +6,6 @@ from typing import Any, Dict, Mapping, Optional, cast
 
 from django import forms
 from django.core.files.base import File
-from django.forms.fields import FileField
 from django.forms.widgets import HiddenInput
 
 from flexible_forms.models import BaseForm, BaseRecord
@@ -74,7 +73,7 @@ class BaseRecordForm(forms.ModelForm):
 
             # If a False value is given for a FileField, it means that the file
             # should be cleared, and its value set to None.
-            if isinstance(field, FileField) and value is False:
+            if isinstance(field, forms.FileField) and value is False:
                 value = None
 
             # Replace the value in cleaned_data with the updated value.
