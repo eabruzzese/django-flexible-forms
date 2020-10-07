@@ -110,8 +110,16 @@ class FlexibleRelation(ForeignObject, FieldCacheMixin):
     def contribute_to_class(
         self, cls: Type[models.Model], name: str, private_only: bool = False
     ) -> None:
+        """Add the relation and optional alias fields to the class.
+
+        Args:
+            cls: The class to contribute to.
+            name: The name of the attribute that the FlexibleRelation was assigned to.
+            private_only: Unused.
+        """
         if cls._meta.abstract or not hasattr(cls, "_flexible_forms"):
-            return super().contribute_to_class(cls, name, private_only=private_only)
+            super().contribute_to_class(cls, name, private_only=private_only)
+            return
 
         cls = cast(Type[FlexibleBaseModel], cls)
 
@@ -227,11 +235,11 @@ class FlexibleRelation(ForeignObject, FieldCacheMixin):
 
 
 class FlexibleForeignKey(FlexibleRelation, models.ForeignKey):
-    pass
+    """A ForeignKey implementation of FlexibleRelation."""
 
 
 class FlexibleOneToOneField(FlexibleRelation, models.OneToOneField):
-    pass
+    """A OneToOneField implementation of FlexibleRelation."""
 
 
 class FlexibleMetaclass(ModelBase):
@@ -243,9 +251,17 @@ class FlexibleMetaclass(ModelBase):
         bases: Union[Tuple, Tuple[Type[Any]]],
         attrs: Dict[str, Any],
     ) -> "FlexibleMetaclass":
-        Meta = attrs.get("Meta", None)
-        abstract = getattr(Meta, "abstract", False)
+        """Build a new Django model with Flexible Forms capabilities.
 
+        Args:
+            cls: This metaclass.
+            name: The name of the model to be created.
+            bases: Base classes the model should inherit from.
+            attrs: A dict of class attributes for the model.
+
+        Returns:
+            Type[models.Model]: The new Django model class.
+        """
         # Process the FlexibleMeta inner class.
         FlexibleMeta = attrs.pop("FlexibleMeta", None)
         if FlexibleMeta:
@@ -1379,6 +1395,22 @@ class FlexibleForms:
     def _get_flexible_base_model(
         self, model_class: Type["FlexibleBaseModel"]
     ) -> Type["FlexibleBaseModel"]:
+        """Resolve the flexible base model for the given model_class.
+
+        Searches the __bases__ of the given model class for one that
+        corresponds to one of the core flexible base models.
+
+        Args:
+            model_class: The model class for which to resolve the flexible
+                base class.
+
+        Returns:
+            Type[FlexibleBaseModel]: The flexible base model.
+
+        Raises:
+            ValueError: if the model_class does not inherit from a flexible
+                base class.
+        """
         flexible_bases = frozenset(FlexibleBaseModel.__subclasses__())
         for base in model_class.__bases__:
             try:
@@ -1396,33 +1428,83 @@ class FlexibleForms:
 
     @property
     def BaseForm(self) -> Type["BaseForm"]:
+        """Return a BaseForm with a reference to _flexible_forms.
+
+        Returns:
+            Type[BaseForm]: A BaseForm class with a _flexible_forms
+                attribute.
+        """
         return self._generate_model(BaseForm)
 
     @property
     def BaseField(self) -> Type["BaseField"]:
+        """Return a BaseField with a reference to _flexible_forms.
+
+        Returns:
+            Type[BaseField]: A BaseField class with a _flexible_forms
+                attribute.
+        """
         return self._generate_model(BaseField)
 
     @property
     def BaseFieldset(self) -> Type["BaseFieldset"]:
+        """Return a BaseFieldset with a reference to _flexible_forms.
+
+        Returns:
+            Type[BaseFieldset]: A BaseFieldset class with a _flexible_forms
+                attribute.
+        """
         return self._generate_model(BaseFieldset)
 
     @property
     def BaseFieldsetItem(self) -> Type["BaseFieldsetItem"]:
+        """Return a BaseFieldsetItem with a reference to _flexible_forms.
+
+        Returns:
+            Type[BaseFieldsetItem]: A BaseFieldsetItem class with a
+                _flexible_forms attribute.
+        """
         return self._generate_model(BaseFieldsetItem)
 
     @property
     def BaseFieldModifier(self) -> Type["BaseFieldModifier"]:
+        """Return a BaseFieldModifier with a reference to _flexible_forms.
+
+        Returns:
+            Type[BaseFieldModifier]: A BaseFieldModifier class with a
+                _flexible_forms attribute.
+        """
         return self._generate_model(BaseFieldModifier)
 
     @property
     def BaseRecord(self) -> Type["BaseRecord"]:
+        """Return a BaseRecord with a reference to _flexible_forms.
+
+        Returns:
+            Type[BaseRecord]: A BaseRecord class with a _flexible_forms
+                attribute.
+        """
         return self._generate_model(BaseRecord)
 
     @property
     def BaseRecordAttribute(self) -> Type["BaseRecordAttribute"]:
+        """Return a BaseRecordAttribute with a reference to _flexible_forms.
+
+        Returns:
+            Type[BaseRecordAttribute]: A BaseRecordAttribute class with a
+                _flexible_forms attribute.
+        """
         return self._generate_model(BaseRecordAttribute)
 
     def _generate_model(self, base_model: Type[T]) -> Type[T]:
+        """Generate a model class from the given base_model.
+
+        Args:
+            base_model: The base model for the new model.
+
+        Returns:
+            Type[T]: A new model with a reference to _flexible_forms.
+        """
         return type(
             f"{self.model_prefix}{base_model.__name__}",
             (base_model,),
