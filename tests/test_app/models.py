@@ -86,3 +86,6 @@ class AppRecordAttribute(app_forms.BaseRecordAttribute, CustomBaseModel):
     class FlexibleMeta:
         field_relation_name = "app_field"
         record_relation_name = "app_record"
+
+
+app_forms.make_flexible()

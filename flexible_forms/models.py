@@ -3,7 +3,7 @@
 """Model definitions for the flexible_forms module."""
 
 import inspect
-import logging
+import weakref
 from itertools import groupby
 from types import ModuleType
 from typing import (
@@ -24,18 +24,18 @@ from typing import (
 )
 
 from django import forms
-from django.core.exceptions import FieldDoesNotExist, ValidationError
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models, transaction
-from django.db.models.base import ModelBase
 from django.db.models.fields.mixins import FieldCacheMixin
-from django.db.models.fields.related import (
+from django.db.models.fields.related import (  # type: ignore
     ForeignObject,
-    ForwardManyToOneDescriptor,
-    ReverseManyToOneDescriptor,
+    lazy_related_operation,
 )
 from django.db.models.options import Options
 from django.db.models.query import Prefetch
+from django.db.models.signals import class_prepared, pre_init
+from django.dispatch.dispatcher import receiver
 from django.forms.widgets import Widget
 from django.utils.datastructures import MultiValueDict
 from django.utils.functional import cached_property
@@ -43,14 +43,16 @@ from django.utils.text import slugify
 from simpleeval import FunctionNotDefined, NameNotDefined
 
 from flexible_forms.fields import FIELD_TYPES
-from flexible_forms.utils import FormEvaluator, evaluate_expression
+from flexible_forms.utils import (
+    FormEvaluator,
+    evaluate_expression,
+    replace_element,
+)
 
 try:
     from django.db.models import JSONField  # type: ignore
 except ImportError:  # pragma: no cover
     from django.contrib.postgres.fields import JSONField
-
-logger = logging.getLogger(__name__)
 
 # If we're only type checking, import things that would otherwise cause an
 # ImportError due to circular dependencies.
@@ -74,36 +76,202 @@ FIELD_TYPE_OPTIONS = sorted(
 )
 
 
-class FlexibleRelation(ForeignObject, FieldCacheMixin):
+class ProxyDescriptor:
+    """Proxy attribute access to another attribute."""
+
+    original_name: str
+
+    def __init__(self, original_name: str):
+        """Establish a proxy descriptor.
+
+        Args:
+            original_name: The name of the attribute on an instance to
+                which attribute access should be proxied.
+        """
+        self.original_name = original_name
+
+    def __get__(self, instance: Optional[object], cls: Optional[Type] = None) -> Any:
+        """Get an attribute's value.
+
+        Proxies the __get__ call to the configured original_name on the
+        instance (or the cls, if instance is None).
+
+        Args:
+            instance: The object from which to get the value.
+            cls: The type of the instance object.
+
+        Returns:
+            Any: the value of the attribute.
+        """
+        return getattr(cls if instance is None else instance, self.original_name)
+
+    def __set__(self, instance: object, value: Any) -> None:
+        """Set an attribute's value.
+
+        Proxies the __set__ call to the attribute with the configured
+        original_name on the instance.
+
+        Args:
+            instance: The object onto which to set the value.
+            value: The value.
+        """
+        setattr(instance, self.original_name, value)
+
+    def __delete__(self, instance: object) -> None:
+        """Delete an attribute's value.
+
+        Proxies the __delete__ call to the attribute with the configured
+        original_name on the instance.
+
+        Args:
+            instance: The object from which to delete the value.
+        """
+        delattr(instance, self.original_name)
+
+
+class AliasField(models.Field):
+    """A model field that defines a transparent alias to another field."""
+
+    original_field: models.Field
+    concrete: bool = False
+
+    def __init__(self, original_field: models.Field, **kwargs: Any) -> None:
+        # Hacky, but: changes its class bases to mimic those of the original
+        # field.
+        self.__class__.__bases__ = original_field.__class__.__bases__
+
+        # Prevent an AppRegistryNotReady error when deconstructing the original
+        # field.
+        original_swappable = getattr(original_field, "swappable", None)
+        setattr(original_field, "swappable", False)
+
+        # Deconstruct the field so that we can use its attributes to build the
+        # alias field.
+        _, _, _, original_kwargs = original_field.deconstruct()
+
+        # Restore the original_swappable value, if necessary.
+        setattr(original_field, "swappable", original_swappable)
+
+        # Initialize the field.
+        super().__init__(**{**original_kwargs, **kwargs})
+
+        self.original_field = original_field
+
+    def contribute_to_class(
+        self, cls: Type[models.Model], name: str, private_only: bool = True
+    ) -> None:
+        """Define the alias field and add it to the model class.
+
+        Handles the model field definition and adds proxy descriptors for
+        transparent field proxying.
+
+        Args:
+            cls: The model class on which the field is defined.
+            name: The name of the class attribute to which the field is
+                assigned.
+            private_only: Whether the field should be considered "private"
+                by the ORM or not. Usually false, but True for the
+                AliasField to prevent it from interfering with migrations
+                and other core Django facilities.
+        """
+        self.name = name
+        self.attname = super().get_attname()
+        self.column = self.original_field.column
+        self.model = self.original_field.model
+
+        # Add the field to the set of fields for the model.
+        cls._meta.add_field(self, private=private_only)
+
+        # Create proxies to the original descriptors.
+        setattr(cls, self.name, ProxyDescriptor(self.original_field.name))
+        setattr(cls, self.attname, ProxyDescriptor(self.original_field.attname))
+
+        # Relation fields should have their reverse descriptors proxied on
+        # their remote model classes.
+        if self.is_relation:
+            lazy_related_operation(
+                lambda _, related, field: setattr(
+                    related,
+                    field.remote_field.get_accessor_name(),
+                    ProxyDescriptor(
+                        field.original_field.remote_field.get_accessor_name(),
+                    ),
+                ),
+                cls,
+                self.original_field.remote_field.model,
+                field=self,
+            )
+
+        # Connect a model signal to sync
+        self._connect_signals(cls)
+
+    def get_cache_name(self) -> str:
+        """Get the cache key for the field.
+
+        Delegates this responsibility to the original field so that the
+        original field and alias field can use the cache interchangeably.
+
+        Returns:
+            str: The cache key for the field.
+        """
+        return cast(FieldCacheMixin, self.original_field).get_cache_name()
+
+    def _connect_signals(self, cls: Type[models.Model]) -> None:
+        """Connect model signals for the given model class.
+
+        Ensures that values between the alias and original fields are
+        synchronized before attempting model operations.
+
+        Args:
+            cls: The class on which to listen for signals.
+        """
+
+        def _on_pre_init(
+            *,
+            kwargs: Any,
+            original_field: models.Field = self.original_field,
+            alias_field: models.Field = self,
+            **_: Any,
+        ) -> None:
+            original_name = original_field.name
+            original_attname = original_field.attname
+            alias_name = alias_field.name
+            alias_attname = alias_field.attname
+
+            if original_name in kwargs and alias_name not in kwargs:
+                kwargs[alias_name] = kwargs[original_name]
+            if original_attname in kwargs and alias_attname not in kwargs:
+                kwargs[alias_attname] = kwargs[original_attname]
+            if alias_name in kwargs and original_name not in kwargs:
+                kwargs[original_name] = kwargs[alias_name]
+            if alias_attname in kwargs and original_attname not in kwargs:
+                kwargs[original_attname] = kwargs[alias_attname]
+
+        pre_init.connect(_on_pre_init, sender=cls, weak=False)
+
+
+class FlexibleRelation(ForeignObject):
     """A custom field for defining a swappable ForeignKey field for a model."""
 
-    related_accessor_class: Type[ReverseManyToOneDescriptor]
-    forward_related_accessor_class: Type[ForwardManyToOneDescriptor]
+    field_class = Type[ForeignObject]
 
     _to_base_model: Type["FlexibleBaseModel"]
 
     _original_field_name: str
-    _original_related_name: str
+    _original_related_name: Optional[str]
     _original_args: Sequence[Any]
     _original_kwargs: Dict[str, Any]
-
-    _aliased_to: str
-
-    concrete: bool
 
     def __init__(
         self,
         to: Type["FlexibleBaseModel"],
         *args: Any,
-        related_name: str,
         **kwargs: Any,
     ) -> None:
         self._to_base_model = to
-        self._original_related_name = related_name
+        self._original_related_name = cast(Optional[str], kwargs.get("related_name"))
         self._original_args = args
         self._original_kwargs = kwargs.copy()
-
-        kwargs["related_name"] = related_name
 
         super().__init__(to, *args, **kwargs)
 
@@ -117,21 +285,20 @@ class FlexibleRelation(ForeignObject, FieldCacheMixin):
             name: The name of the attribute that the FlexibleRelation was assigned to.
             private_only: Unused.
         """
+        cls = cast(Type[FlexibleBaseModel], cls)
+        self._original_field_name = name
+
         if cls._meta.abstract or not hasattr(cls, "_flexible_forms"):
             super().contribute_to_class(cls, name, private_only=private_only)
             return
 
-        cls = cast(Type[FlexibleBaseModel], cls)
-
-        self._original_field_name = name
-
         # Resolve the appropriate concrete model and field names for the configured _to_base_model.
         to_concrete_model = cls._flexible_forms.get_registered_model(
-            self._to_base_model
+            self._to_base_model, create=True
         )
-        field_name = getattr(cls._flexible_meta, f"{name}_relation_name")
+        field_name = getattr(cls.FlexibleMeta, f"{name}_relation_name")
         related_name = getattr(
-            to_concrete_model._flexible_meta,
+            to_concrete_model.FlexibleMeta,
             f"{self._original_related_name}_relation_name",
         )
 
@@ -147,50 +314,21 @@ class FlexibleRelation(ForeignObject, FieldCacheMixin):
 
         # If the field name or related name configured in the FlexibleMeta
         # differs from the original name, add an alias field so that this field
-        # can be accessed from either property.
+        # can be accessed transparently from either property.
         if field_name != self._original_field_name:
-            alias_field = self.__class__(
-                to_concrete_model,
-                *self._original_args,
-                related_name=self._original_related_name,
-                **self._original_kwargs,
-            )
-            alias_field.model = cls
-            alias_field.opts = self.opts
-            alias_field.name = self._original_field_name
-            alias_field.verbose_name = self._original_field_name.replace("_", " ")
-            alias_field.attname = self.attname
-            alias_field.column = self.column
-            alias_field.concrete = True
-
-            alias_field._aliased_to = field_name
-            self._aliased_to = alias_field.name
-
             cls._meta = self._reconfigure_meta(
                 cls._meta, self._original_field_name, field_name
             )
-            cls._meta.add_field(alias_field, private=True)
-            setattr(cls, alias_field.name, getattr(cls, field_name))
-            setattr(cls, f"{alias_field.name}_id", getattr(cls, f"{field_name}_id"))
-
-        if related_name != self._original_related_name:
-            setattr(
-                to_concrete_model,
-                self._original_related_name,
-                self.related_accessor_class(cast(FieldCacheMixin, self.remote_field)),
+            alias_field = AliasField(
+                original_field=self,
+                to=to_concrete_model,
+                related_name=self._original_related_name,
+            )
+            alias_field.contribute_to_class(
+                cls, self._original_field_name, private_only=True
             )
 
-    def get_cache_name(self) -> str:
-        """Generate a cache name for the aliased field.
-
-        If the FlexibleRelation has an alias field, the alias is added to the cache key.
-
-        Returns:
-            str: The cache key for the FlexibleRelation field.
-        """
-        cache_name = super().get_cache_name()
-        cache_alias = getattr(self, "_aliased_to", "")
-        return "+".join(sorted(filter(bool, (cache_name, cache_alias))))
+        self.__class__ = self.field_class  # type: ignore
 
     def _reconfigure_meta(
         self, meta: Options, from_field: str, to_field: str
@@ -203,21 +341,19 @@ class FlexibleRelation(ForeignObject, FieldCacheMixin):
         )
         meta.original_attrs["order_with_respect_to"] = meta.order_with_respect_to
 
-        meta.unique_together = _replace_element(
+        meta.unique_together = replace_element(
             from_field, to_field, meta.unique_together
         )
         meta.original_attrs["unique_together"] = meta.unique_together
 
-        meta.index_together = _replace_element(
-            from_field, to_field, meta.index_together
-        )
+        meta.index_together = replace_element(from_field, to_field, meta.index_together)
         meta.original_attrs["index_together"] = meta.index_together
 
         indexes = []
         for index in meta.indexes:
             index_class = index.__class__
             _, _, kwargs = index.deconstruct()
-            kwargs["fields"] = _replace_element(from_field, to_field, kwargs["fields"])
+            kwargs["fields"] = replace_element(from_field, to_field, kwargs["fields"])
             indexes.append(index_class(**kwargs))
         meta.indexes = indexes
         meta.original_attrs["indexes"] = meta.indexes
@@ -226,7 +362,7 @@ class FlexibleRelation(ForeignObject, FieldCacheMixin):
         for constraint in meta.constraints:
             constraint_class = constraint.__class__
             _, _, kwargs = constraint.deconstruct()
-            kwargs["fields"] = _replace_element(from_field, to_field, kwargs["fields"])
+            kwargs["fields"] = replace_element(from_field, to_field, kwargs["fields"])
             constraints.append(constraint_class(**kwargs))
         meta.constraints = constraints
         meta.original_attrs["constraints"] = meta.constraints
@@ -235,109 +371,26 @@ class FlexibleRelation(ForeignObject, FieldCacheMixin):
 
 
 class FlexibleForeignKey(FlexibleRelation, models.ForeignKey):
-    """A ForeignKey implementation of FlexibleRelation."""
+    """A flexible foreign key relation field."""
+
+    field_class = models.ForeignKey
 
 
 class FlexibleOneToOneField(FlexibleRelation, models.OneToOneField):
-    """A OneToOneField implementation of FlexibleRelation."""
+    """A flexible one-to-one relation field."""
+
+    field_class = models.OneToOneField
 
 
-class FlexibleMetaclass(ModelBase):
-    """A metaclass for custom model definition behavior."""
-
-    def __new__(
-        cls: Type["FlexibleMetaclass"],
-        name: str,
-        bases: Union[Tuple, Tuple[Type[Any]]],
-        attrs: Dict[str, Any],
-    ) -> "FlexibleMetaclass":
-        """Build a new Django model with Flexible Forms capabilities.
-
-        Args:
-            cls: This metaclass.
-            name: The name of the model to be created.
-            bases: Base classes the model should inherit from.
-            attrs: A dict of class attributes for the model.
-
-        Returns:
-            Type[models.Model]: The new Django model class.
-        """
-        # Process the FlexibleMeta inner class.
-        FlexibleMeta = attrs.pop("FlexibleMeta", None)
-        if FlexibleMeta:
-            attrs["_flexible_meta"] = FlexibleMeta()
-
-        # Copy the _flexible_forms reference to the attrs dict so that concrete
-        # implementations have access to it while they're being defined.
-        try:
-            flexible_base_model = cast(
-                Type["FlexibleBaseModel"],
-                next(base for base in bases if issubclass(base, FlexibleBaseModel)),
-            )
-            attrs["_flexible_forms"] = flexible_base_model._flexible_forms
-        except (NameError, StopIteration, AttributeError):
-            pass
-
-        # Prepare the model class as usual.
-        model_class = cast(
-            Type["FlexibleBaseModel"], super().__new__(cls, name, bases, attrs)
-        )
-
-        # If we've just prepared a concrete model, register it with the
-        # _flexible_forms instance attached to it.
-        if not model_class._meta.abstract:
-            model_class._flexible_forms.register_model(model_class)
-
-        return model_class
-
-
-def _replace_element(
-    needle: Any,
-    replacement: Any,
-    haystack: Union[List[Any], Tuple[Any, ...]],
-) -> Union[List[Any], Tuple[Any, ...]]:
-    elements = type(haystack)()
-    for element in haystack:
-        if isinstance(element, str):
-            element = replacement if element == needle else element
-        elif hasattr(element, "__iter__"):
-            element = _replace_element(needle, replacement, element)
-        elements = [*elements, element]
-    return elements
-
-
-class FlexibleBaseModel(models.Model, metaclass=FlexibleMetaclass):
+class FlexibleBaseModel(models.Model):
     """A common base for all FlexibleField base models."""
 
     class Meta:
         abstract = True
 
+    FlexibleMeta: Type[Any]
+
     _flexible_forms: "FlexibleForms"
-    _flexible_meta: Any
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        for field_name, value in tuple(kwargs.items()):
-            try:
-                field = self._meta.get_field(field_name)
-            except FieldDoesNotExist:
-                continue
-            aliased_field_name = getattr(field, "_aliased_to", None)
-
-            if aliased_field_name:
-                kwargs[aliased_field_name] = value
-
-            # If both the field and its alias are specified, they should have
-            # the same value to prevent conflicts.
-            aliased_field_value = kwargs.get(aliased_field_name)
-            if aliased_field_name in kwargs and aliased_field_value != value:
-                raise ValueError(
-                    f"Both {field_name} and its alias {aliased_field_name} were "
-                    f"specified, but they have different values ({field_name}={value}, "
-                    f"{aliased_field_name}={aliased_field_value}). They should either "
-                    f"have the same value, or only one should be specified."
-                )
-
-        super().__init__(*args, **kwargs)
 
     @classmethod
     def _flexible_model_for(cls, base_model: Type[T]) -> Type[T]:
@@ -351,6 +404,23 @@ class FlexibleBaseModel(models.Model, metaclass=FlexibleMetaclass):
                 the current implementation.
         """
         return cast(Type[T], cls._flexible_forms.get_registered_model(base_model))
+
+
+@receiver(class_prepared)
+def register_flexible_model(sender: Type[models.Model], **kwargs: Any) -> None:
+    """Register a new flexible model.
+
+    When a FlexibleBaseModel implementation has been prepared, it is
+    registered with the appropriate FlexibleForms object so that other
+    dependent FlexibleForms models can reference it.
+
+    Args:
+        sender: The prepared model class.
+        kwargs: Unused.
+    """
+    if not issubclass(sender, FlexibleBaseModel) or sender._meta.abstract:
+        return
+    sender._flexible_forms.register_model(sender)
 
 
 class BaseForm(FlexibleBaseModel):
@@ -888,7 +958,9 @@ class BaseFieldsetItem(FlexibleBaseModel):
     )
     fieldset_id: Optional[int]
     field: "models.OneToOneField[BaseField, BaseField]" = FlexibleOneToOneField(
-        BaseField, on_delete=models.CASCADE, related_name="fieldset_item"
+        BaseField,
+        on_delete=models.CASCADE,
+        related_name="fieldset_item",
     )
     field_id: Optional[int]
 
@@ -1189,12 +1261,16 @@ class BaseRecordAttribute(FlexibleBaseModel):
     _VALUE_FIELD_PREFIX = "_value_"
 
     record: "models.ForeignKey[BaseRecord, BaseRecord]" = FlexibleForeignKey(
-        BaseRecord, on_delete=models.CASCADE, related_name="_attributes"
+        BaseRecord,
+        on_delete=models.CASCADE,
+        related_name="_attributes",
     )
     record_id: Optional[int]
 
     field: "models.ForeignKey[BaseField, BaseField]" = FlexibleForeignKey(
-        BaseField, on_delete=models.CASCADE, related_name="attributes"
+        BaseField,
+        on_delete=models.CASCADE,
+        related_name="attributes",
     )
     field_id: Optional[int]
 
@@ -1342,12 +1418,31 @@ class FlexibleForms:
     ```
     """
 
+    finalized: bool
+
     def __init__(self, model_prefix: Optional[str] = None) -> None:
+        """Initialize the FlexibleForms object.
+
+        Args:
+            model_prefix: The prefix to use when generating model names for
+                default models.
+        """
         self.model_prefix = model_prefix or ""
         self.module = cast(ModuleType, inspect.getmodule(inspect.stack()[1][0]))
         self.models: Dict[
             Union[Type[FlexibleBaseModel], str], Type[FlexibleBaseModel]
         ] = {}
+        self._finalizer = weakref.finalize(self, self._check_finalized, self)
+
+    def make_flexible(self) -> None:
+        """Generate default models.
+
+        FlexibleForms will generate default models for any models that
+        were not explicity implemented in the source module.
+        """
+        for base_model in FlexibleBaseModel.__subclasses__():
+            self.get_registered_model(base_model, create=True)
+        self.finalized = True
 
     def register_model(self, model_class: Type[FlexibleBaseModel]) -> None:
         """Register a concrete implementation of a flexible base model.
@@ -1369,28 +1464,47 @@ class FlexibleForms:
         self.models[f"{base_opts.app_label}.{base_opts.model_name}"] = model_class
 
     def get_registered_model(
-        self, base_model: Union[str, Type["FlexibleBaseModel"]]
+        self,
+        base_model: Union[str, Type["FlexibleBaseModel"]],
+        *,
+        create: bool = False,
     ) -> Type["FlexibleBaseModel"]:
         """Returns the concrete model for the given flexible base model.
 
         Args:
             base_model: The base model for which to return the concrete model
                 implementation.
+            create: When True, generates a default model with the given base
+                class if one does not already exist.
 
         Raises:
             LookupError: if no concrete model has been registered for the
                 given base yet.
+            ValueError: if the given base_model does not inherit from a
+                subclass of FlexibleBaseModel.
 
         Returns:
             Type[FlexibleBaseModel]: The concrete model implementation for
                 the base model.
         """
-        if base_model not in self.models:
+        # If no model is registered for the requested base_model yet, and
+        # create is True, create and register a new model.
+        if base_model not in self.models and create:
+            base_model = cast(Type["FlexibleBaseModel"], base_model)
+            self.register_model(
+                type(
+                    base_model.__name__.replace("Base", self.model_prefix),
+                    (getattr(self, base_model.__name__),),
+                    {"__module__": self.module.__name__},
+                )
+            )
+
+        try:
+            return self.models[base_model]
+        except KeyError:
             raise LookupError(
                 f"No concrete model has been registered for {base_model}: {self.models}"
             )
-
-        return self.models[base_model]
 
     def _get_flexible_base_model(
         self, model_class: Type["FlexibleBaseModel"]
@@ -1419,7 +1533,7 @@ class FlexibleForms:
                     for flexible_base in flexible_bases
                     if issubclass(base, flexible_base)
                 )
-            except (NameError, StopIteration):
+            except StopIteration:
                 continue
 
         raise ValueError(
@@ -1519,4 +1633,25 @@ class FlexibleForms:
                     },
                 ),
             },
+        )
+
+    @staticmethod
+    def _check_finalized(flexible_forms: "FlexibleForms") -> None:
+        """Ensure that make_flexible has been called.
+
+        Attempts to catch a developer mistake where they forget to call
+        make_flexible after defining their model overrides.
+
+        Args:
+            flexible_forms: The FlexibleForms object to be checked.
+
+        Raises:
+            ImproperlyConfigured: If make_flexible has not been called on the
+                object before exiting.
+        """
+        if flexible_forms.finalized:
+            return
+        raise ImproperlyConfigured(
+            f"A FlexibleForms object was created in {flexible_forms.module}, but "
+            f"`make_flexible` was never called on it."
         )
