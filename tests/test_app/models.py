@@ -32,51 +32,47 @@ app_forms = FlexibleForms(model_prefix="App")
 class AppForm(app_forms.BaseForm, CustomBaseModel):
     """A customized version of the Form provided by flexible_forms."""
 
-    class FlexibleMeta:
-        fields_relation_name = "app_fields"
-        fieldsets_relation_name = "app_fieldsets"
-        records_relation_name = "app_records"
-
 
 class AppField(app_forms.BaseField, CustomBaseModel):
     """A customized version of the Field provided by flexible_forms."""
 
     class FlexibleMeta:
-        form_relation_name = "app_form"
-        fieldset_item_relation_name = "app_fieldset_item"
-        modifiers_relation_name = "app_modifiers"
-        attributes_relation_name = "app_record_attributes"
+        form_field_name = "app_form"
+        form_field_related_name = "app_fields"
 
 
 class AppFieldset(app_forms.BaseFieldset, CustomBaseModel):
     """A customized version of the Fieldset provided by flexible_forms."""
 
     class FlexibleMeta:
-        form_relation_name = "app_form"
-        items_relation_name = "app_fieldset_items"
+        form_field_name = "app_form"
+        form_field_related_name = "app_fieldsets"
 
 
 class AppFieldsetItem(app_forms.BaseFieldsetItem, CustomBaseModel):
     """A customized version of the FieldsetItem provided by flexible_forms."""
 
     class FlexibleMeta:
-        field_relation_name = "app_field"
-        fieldset_relation_name = "app_fieldset"
+        field_field_name = "app_field"
+        field_field_related_name = "app_fieldsets"
+        fieldset_field_name = "app_fieldset"
+        fieldset_field_related_name = "app_fieldset_items"
 
 
 class AppFieldModifier(app_forms.BaseFieldModifier, CustomBaseModel):
     """A customized version of the FieldModifier provided by flexible_forms."""
 
     class FlexibleMeta:
-        field_relation_name = "app_field"
+        field_field_name = "app_field"
+        field_field_related_name = "app_field_modifiers"
 
 
 class AppRecord(app_forms.BaseRecord, CustomBaseModel):
     """A customized version of the Record provided by flexible_forms."""
 
     class FlexibleMeta:
-        _form_relation_name = "app_form"
-        _attributes_relation_name = "app_record_attributes"
+        _form_field_name = "app_form"
+        _form_field_related_name = "app_records"
 
 
 class AppRecordAttribute(app_forms.BaseRecordAttribute, CustomBaseModel):
@@ -84,8 +80,10 @@ class AppRecordAttribute(app_forms.BaseRecordAttribute, CustomBaseModel):
     flexible_forms."""
 
     class FlexibleMeta:
-        field_relation_name = "app_field"
-        record_relation_name = "app_record"
+        field_field_name = "app_field"
+        field_field_related_name = "app_attributes"
+        record_field_name = "app_record"
+        record_field_related_name = "app_attributes"
 
 
 app_forms.make_flexible()
