@@ -144,7 +144,7 @@ def test_record_admin(django_assert_num_queries: Any) -> None:
     assert set(record_form().fields.keys()) == set(
         f.name
         for f in AppRecord._meta.get_fields()
-        if f.concrete and f.name not in ("id",)
+        if f.concrete and f.name not in ("id",) or f.name in ("_form",)
     )
 
     # Call the add_view() view method with our form's ID in the querystring to

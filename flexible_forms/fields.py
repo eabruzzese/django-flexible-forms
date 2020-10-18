@@ -15,7 +15,7 @@ try:
 except ImportError:  # pragma: no cover
     from django.contrib.postgres.fields import JSONField
 
-from .utils import all_subclasses, evaluate_expression
+from flexible_forms.utils import all_subclasses, evaluate_expression
 
 ##
 # _EMPTY_CHOICES

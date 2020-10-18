@@ -58,6 +58,7 @@ class FieldModifiersInline(TabularInline):
     classes = ("collapse",)
     model = BaseFieldModifier
     extra = 1
+    fk_name = "field"
 
     formfield_overrides = DEFAULT_FORMFIELD_OVERRIDES
 
@@ -99,6 +100,7 @@ class FieldsetItemsInline(TabularInline):
 
     model = BaseFieldsetItem
     extra = 1
+    fk_name = "fieldset"
 
     formfield_overrides = DEFAULT_FORMFIELD_OVERRIDES
 

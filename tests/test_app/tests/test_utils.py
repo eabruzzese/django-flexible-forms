@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from flexible_forms.utils import empty
+from flexible_forms.utils import empty, replace_element
 
 
 def test_empty() -> None:
@@ -20,3 +20,24 @@ def test_empty() -> None:
     assert empty(None)
     assert not empty(True)
     assert not empty(False)
+
+
+def test_replace_element() -> None:
+    """Ensure that replace_element recursively replaces elements in a data
+    structure."""
+    needle = "needle"
+    replacement = "replacement"
+    haystack = (
+        ["needle", "not-needle", ("needle",)],
+        "needle",
+        "not-needle",
+        set(["needle", "not-needle"]),
+    )
+    expected_result = (
+        ["replacement", "not-needle", ("replacement",)],
+        "replacement",
+        "not-needle",
+        set(["replacement", "not-needle"]),
+    )
+
+    assert replace_element(needle, replacement, haystack) == expected_result

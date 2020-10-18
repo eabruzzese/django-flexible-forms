@@ -5,9 +5,11 @@
 from typing import (
     TYPE_CHECKING,
     Any,
+    List,
     Mapping,
     Optional,
     Set,
+    Tuple,
     Type,
     TypeVar,
     Union,
@@ -122,3 +124,29 @@ def evaluate_expression(
     """
     evaluator = FormEvaluator(names=names, **kwargs)
     return evaluator.eval(expression)
+
+
+def replace_element(
+    needle: Any,
+    replacement: Any,
+    haystack: Union[List[Any], Tuple[Any, ...]],
+) -> Union[List[Any], Tuple[Any, ...]]:
+    """Replace a value recursively in a given data structure.
+
+    Args:
+        needle: The element to replace.
+        replacement: The replacement value.
+        haystack: The data structure in which to find and replace values.
+
+    Returns:
+        Union[List[Any], Tuple[Any, ...]]: A new data structure of the given
+            type with the desired elements replaced.
+    """
+    elements = type(haystack)()
+    for element in haystack:
+        if isinstance(element, str):
+            element = replacement if element == needle else element
+        else:
+            element = replace_element(needle, replacement, element)
+        elements = type(haystack)([*elements, element])
+    return elements
