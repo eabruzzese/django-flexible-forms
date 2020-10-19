@@ -606,7 +606,8 @@ def test_record(
         assert isinstance(record, AppRecord)
 
         # Ensure form records and their attributes have a friendly string representation.
-        assert str(record) == f"Record {record.pk} (_form_id={record._form_id})"
+        assert str(record) == f"{form.label} {record.pk}"
+        assert str(AppRecord()) == f"New Record"
 
         sample_attribute = record._attributes.first()
         assert (

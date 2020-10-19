@@ -1070,7 +1070,17 @@ class BaseRecord(FlexibleBaseModel):
         _form_field_related_name = "records"
 
     def __str__(self) -> str:
-        return f"Record {self.pk} (_form_id={self._form_id})"
+        # If we can get the name of the record's form without making a database
+        # call, do it so we can make the __str__ more descriptive. Otherise,
+        # just call it a "Record".
+        record_type = (
+            self._form.label
+            if self.__dict__.get("_form")
+            or self._meta.get_field("_form").get_cached_value(self)
+            else "Record"
+        )
+
+        return f"New {record_type}" if not self.pk else f"{record_type} {self.pk}"
 
     def __init__(
         self, *args: Any, _form: Optional[BaseForm] = None, **kwargs: Any
