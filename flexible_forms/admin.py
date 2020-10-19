@@ -15,12 +15,14 @@ from django.urls import reverse
 from django.utils.safestring import SafeText, mark_safe
 
 from flexible_forms.models import (
+    AliasField,
     BaseField,
     BaseFieldModifier,
     BaseFieldset,
     BaseFieldsetItem,
     BaseForm,
     BaseRecord,
+    FlexibleBaseModel,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,26 +54,79 @@ DEFAULT_FORMFIELD_OVERRIDES = {
 }
 
 
-class FieldModifiersInline(TabularInline):
+class FlexibleAdminMixin:
+    """An admin class mixin for flexible form models."""
+
+    model: Type[FlexibleBaseModel]
+    formfield_overrides = DEFAULT_FORMFIELD_OVERRIDES
+
+    @property
+    def exclude(self) -> Tuple[str, ...]:
+        """Exclude alias fields from the admin form.
+
+        Handles the case where the implementer has aliased one or more fields
+        on the model.
+
+        Returns:
+            Tuple[str]: A tuple with the names of aliased fields.
+        """
+        return tuple(
+            f.name for f in self.model._meta.fields if isinstance(f, AliasField)
+        )
+
+
+class FieldModifiersInline(TabularInline, FlexibleAdminMixin):
     """An inline representing a single modifier for a field on a form."""
 
     classes = ("collapse",)
     model = BaseFieldModifier
     extra = 1
-    fk_name = "field"
 
-    formfield_overrides = DEFAULT_FORMFIELD_OVERRIDES
+    @property
+    def fk_name(self) -> str:
+        """Return the name of the field with a ForeignKey to the Field.
+
+        Handles the case where the implementer has aliased the "field" field.
+
+        Returns:
+            str: The name of the field ForeignKey field.
+        """
+        original_fk_name = BaseFieldModifier.FlexibleMeta.field_field_name
+        return next(
+            (
+                f.original_field.name
+                for f in self.model._meta.fields
+                if isinstance(f, AliasField) and f.name == original_fk_name
+            ),
+            original_fk_name,
+        )
 
 
-class FieldsInline(StackedInline):
+class FieldsInline(StackedInline, FlexibleAdminMixin):
     """An inline representing a single field on a Form."""
 
     classes = ("collapse",)
     model = BaseField
     extra = 1
-    fk_name = "form"
 
-    formfield_overrides = DEFAULT_FORMFIELD_OVERRIDES
+    @property
+    def fk_name(self) -> str:
+        """Return the name of the field with a ForeignKey to the Form.
+
+        Handles the case where the implementer has aliased the "form" field.
+
+        Returns:
+            str: The name of the form ForeignKey field.
+        """
+        original_fk_name = BaseField.FlexibleMeta.form_field_name
+        return next(
+            (
+                f.original_field.name
+                for f in self.model._meta.fields
+                if isinstance(f, AliasField) and f.name == original_fk_name
+            ),
+            original_fk_name,
+        )
 
     @property
     def inlines(self) -> Iterable[InlineModelAdmin]:
@@ -95,14 +150,30 @@ class FieldsInline(StackedInline):
         )
 
 
-class FieldsetItemsInline(TabularInline):
+class FieldsetItemsInline(TabularInline, FlexibleAdminMixin):
     """An inline representing an item in a fieldset on a Form."""
 
     model = BaseFieldsetItem
     extra = 1
-    fk_name = "fieldset"
 
-    formfield_overrides = DEFAULT_FORMFIELD_OVERRIDES
+    @property
+    def fk_name(self) -> str:
+        """Return the name of the field with a ForeignKey to the Fieldset.
+
+        Handles the case where the implementer has aliased the "fieldset" field.
+
+        Returns:
+            str: The name of the fieldset ForeignKey field.
+        """
+        original_fk_name = BaseFieldsetItem.FlexibleMeta.fieldset_field_name
+        return next(
+            (
+                f.original_field.name
+                for f in self.model._meta.fields
+                if isinstance(f, AliasField) and f.name == original_fk_name
+            ),
+            original_fk_name,
+        )
 
     def formfield_for_foreignkey(
         self, db_field: models.Field, request: HttpRequest, **kwargs: Any
@@ -133,15 +204,31 @@ class FieldsetItemsInline(TabularInline):
         )
 
 
-class FieldsetsInline(StackedInline):
+class FieldsetsInline(StackedInline, FlexibleAdminMixin):
     """An inline representing a fieldset on a Form."""
 
     classes = ("collapse",)
     model = BaseFieldset
     extra = 1
-    fk_name = "form"
 
-    formfield_overrides = DEFAULT_FORMFIELD_OVERRIDES
+    @property
+    def fk_name(self) -> str:
+        """Return the name of the field with a ForeignKey to the Form.
+
+        Handles the case where the implementer has aliased the "form" field.
+
+        Returns:
+            str: The name of the form ForeignKey field.
+        """
+        original_fk_name = BaseFieldset.FlexibleMeta.form_field_name
+        return next(
+            (
+                f.original_field.name
+                for f in self.model._meta.fields
+                if isinstance(f, AliasField) and f.name == original_fk_name
+            ),
+            original_fk_name,
+        )
 
     @property
     def inlines(self) -> Iterable[InlineModelAdmin]:
@@ -167,13 +254,11 @@ class FieldsetsInline(StackedInline):
         )
 
 
-class FormsAdmin(ModelAdmin):
+class FormsAdmin(ModelAdmin, FlexibleAdminMixin):
     """An admin configuration for managing flexible forms."""
 
     class Meta:
         pass
-
-    formfield_overrides = DEFAULT_FORMFIELD_OVERRIDES
 
     list_display = ("label", "_fields_count", "_records_count", "_add_record")
 
@@ -224,7 +309,7 @@ class FormsAdmin(ModelAdmin):
             ),
         )
 
-    def _fields_count(self, form: "BaseForm") -> int:
+    def _fields_count(self, form: BaseForm) -> int:
         """The number of fields related to this form.
 
         Args:
@@ -238,7 +323,7 @@ class FormsAdmin(ModelAdmin):
     _fields_count.short_description = "Fields"  # type: ignore
     _fields_count.admin_order_field = "fields__count"  # type: ignore
 
-    def _records_count(self, form: "BaseForm") -> SafeText:
+    def _records_count(self, form: BaseForm) -> SafeText:
         """The number of records related to this form.
 
         Args:
@@ -248,7 +333,7 @@ class FormsAdmin(ModelAdmin):
             SafeText: The number of records related to the form in a
                 hyperlink to the records listing with a filter for the form.
         """
-        Record = self.model
+        Record = form._flexible_model_for(BaseRecord)
         app_label = Record._meta.app_label  # noqa: WPS437
         model_name = Record._meta.model_name  # noqa: WPS437
 
@@ -263,7 +348,7 @@ class FormsAdmin(ModelAdmin):
     _records_count.short_description = "Records"  # type: ignore
     _records_count.admin_order_field = "records__count"  # type: ignore
 
-    def _add_record(self, form: "BaseForm") -> SafeText:
+    def _add_record(self, form: BaseForm) -> SafeText:
         Record = form._flexible_model_for(BaseRecord)
         app_label = Record._meta.app_label  # noqa: WPS437
         model_name = Record._meta.model_name  # noqa: WPS437
@@ -280,14 +365,35 @@ class FormsAdmin(ModelAdmin):
         )  # noqa: S308, S703, E501
 
 
-class RecordsAdmin(admin.ModelAdmin):
+class RecordsAdmin(admin.ModelAdmin, FlexibleAdminMixin):
     """An admin configuration for managing records."""
 
     class Meta:
         pass
 
+    list_display = ("_record_label", "_form_label")
+
     # Type hints.
     model: Type[BaseRecord]
+
+    def _record_label(self, record: BaseRecord) -> str:
+        return getattr(record, "label", None) or str(record)
+
+    def _form_label(self, record: BaseRecord) -> SafeText:
+        Form = record._form._flexible_model_for(BaseForm)
+        app_label = Form._meta.app_label  # noqa: WPS437
+        model_name = Form._meta.model_name  # noqa: WPS437
+
+        change_url = reverse(
+            f"admin:{app_label}_{model_name}_change", args=(record._form.pk,)
+        )
+
+        return mark_safe(
+            f'<a href="{change_url}">{record._form.label}</a>'
+        )  # noqa: S308, S703, E501
+
+    _form_label.short_description = "Form"  # type: ignore
+    _form_label.admin_order_field = "_form__label"  # type: ignore
 
     def get_queryset(
         self,
