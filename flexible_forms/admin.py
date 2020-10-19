@@ -75,7 +75,7 @@ class FlexibleAdminMixin:
         )
 
 
-class FieldModifiersInline(TabularInline, FlexibleAdminMixin):
+class FieldModifiersInline(FlexibleAdminMixin, TabularInline):
     """An inline representing a single modifier for a field on a form."""
 
     classes = ("collapse",)
@@ -92,7 +92,7 @@ class FieldModifiersInline(TabularInline, FlexibleAdminMixin):
             str: The name of the field ForeignKey field.
         """
         original_fk_name = BaseFieldModifier.FlexibleMeta.field_field_name
-        return next(
+        concrete_fk_name = next(  # pragma: no cover
             (
                 f.original_field.name
                 for f in self.model._meta.fields
@@ -101,8 +101,10 @@ class FieldModifiersInline(TabularInline, FlexibleAdminMixin):
             original_fk_name,
         )
 
+        return concrete_fk_name
 
-class FieldsInline(StackedInline, FlexibleAdminMixin):
+
+class FieldsInline(FlexibleAdminMixin, StackedInline):
     """An inline representing a single field on a Form."""
 
     classes = ("collapse",)
@@ -119,7 +121,7 @@ class FieldsInline(StackedInline, FlexibleAdminMixin):
             str: The name of the form ForeignKey field.
         """
         original_fk_name = BaseField.FlexibleMeta.form_field_name
-        return next(
+        concrete_fk_name = next(  # pragma: no cover
             (
                 f.original_field.name
                 for f in self.model._meta.fields
@@ -127,6 +129,8 @@ class FieldsInline(StackedInline, FlexibleAdminMixin):
             ),
             original_fk_name,
         )
+
+        return concrete_fk_name
 
     @property
     def inlines(self) -> Iterable[InlineModelAdmin]:
@@ -150,7 +154,7 @@ class FieldsInline(StackedInline, FlexibleAdminMixin):
         )
 
 
-class FieldsetItemsInline(TabularInline, FlexibleAdminMixin):
+class FieldsetItemsInline(FlexibleAdminMixin, TabularInline):
     """An inline representing an item in a fieldset on a Form."""
 
     model = BaseFieldsetItem
@@ -166,7 +170,7 @@ class FieldsetItemsInline(TabularInline, FlexibleAdminMixin):
             str: The name of the fieldset ForeignKey field.
         """
         original_fk_name = BaseFieldsetItem.FlexibleMeta.fieldset_field_name
-        return next(
+        concrete_fk_name = next(  # pragma: no cover
             (
                 f.original_field.name
                 for f in self.model._meta.fields
@@ -174,6 +178,8 @@ class FieldsetItemsInline(TabularInline, FlexibleAdminMixin):
             ),
             original_fk_name,
         )
+
+        return concrete_fk_name
 
     def formfield_for_foreignkey(
         self, db_field: models.Field, request: HttpRequest, **kwargs: Any
@@ -204,7 +210,7 @@ class FieldsetItemsInline(TabularInline, FlexibleAdminMixin):
         )
 
 
-class FieldsetsInline(StackedInline, FlexibleAdminMixin):
+class FieldsetsInline(FlexibleAdminMixin, StackedInline):
     """An inline representing a fieldset on a Form."""
 
     classes = ("collapse",)
@@ -221,7 +227,7 @@ class FieldsetsInline(StackedInline, FlexibleAdminMixin):
             str: The name of the form ForeignKey field.
         """
         original_fk_name = BaseFieldset.FlexibleMeta.form_field_name
-        return next(
+        concrete_fk_name = next(  # pragma: no cover
             (
                 f.original_field.name
                 for f in self.model._meta.fields
@@ -229,6 +235,8 @@ class FieldsetsInline(StackedInline, FlexibleAdminMixin):
             ),
             original_fk_name,
         )
+
+        return concrete_fk_name
 
     @property
     def inlines(self) -> Iterable[InlineModelAdmin]:
@@ -254,7 +262,7 @@ class FieldsetsInline(StackedInline, FlexibleAdminMixin):
         )
 
 
-class FormsAdmin(ModelAdmin, FlexibleAdminMixin):
+class FormsAdmin(FlexibleAdminMixin, ModelAdmin):
     """An admin configuration for managing flexible forms."""
 
     class Meta:
@@ -365,35 +373,16 @@ class FormsAdmin(ModelAdmin, FlexibleAdminMixin):
         )  # noqa: S308, S703, E501
 
 
-class RecordsAdmin(admin.ModelAdmin, FlexibleAdminMixin):
+class RecordsAdmin(FlexibleAdminMixin, admin.ModelAdmin):
     """An admin configuration for managing records."""
 
     class Meta:
         pass
 
-    list_display = ("_record_label", "_form_label")
+    list_display = ("__str__", "_form_label")
 
     # Type hints.
     model: Type[BaseRecord]
-
-    def _record_label(self, record: BaseRecord) -> str:
-        return getattr(record, "label", None) or str(record)
-
-    def _form_label(self, record: BaseRecord) -> SafeText:
-        Form = record._form._flexible_model_for(BaseForm)
-        app_label = Form._meta.app_label  # noqa: WPS437
-        model_name = Form._meta.model_name  # noqa: WPS437
-
-        change_url = reverse(
-            f"admin:{app_label}_{model_name}_change", args=(record._form.pk,)
-        )
-
-        return mark_safe(
-            f'<a href="{change_url}">{record._form.label}</a>'
-        )  # noqa: S308, S703, E501
-
-    _form_label.short_description = "Form"  # type: ignore
-    _form_label.admin_order_field = "_form__label"  # type: ignore
 
     def get_queryset(
         self,
@@ -413,8 +402,36 @@ class RecordsAdmin(admin.ModelAdmin, FlexibleAdminMixin):
             super()
             .get_queryset(*args, **kwargs)
             .select_related("_form")
-            .prefetch_related("_form__fields__modifiers", "_attributes__field")
+            .prefetch_related(
+                "_form__fields__modifiers",
+                "_form__fieldsets__items__field",
+                "_attributes__field",
+            )
         )
+
+    def _form_label(self, record: BaseRecord) -> SafeText:
+        """Return the label of the record's form.
+
+        Links to the change form for the form.
+
+        Returns:
+            SafeText: The label of the record's form, linked to the change
+                page for that form.
+        """
+        Form = record._form._flexible_model_for(BaseForm)
+        app_label = Form._meta.app_label  # noqa: WPS437
+        model_name = Form._meta.model_name  # noqa: WPS437
+
+        change_url = reverse(
+            f"admin:{app_label}_{model_name}_change", args=(record._form.pk,)
+        )
+
+        return mark_safe(
+            f'<a href="{change_url}">{record._form.label}</a>'
+        )  # noqa: S308, S703, E501
+
+    _form_label.short_description = "Form"  # type: ignore
+    _form_label.admin_order_field = "_form__label"  # type: ignore
 
     def get_fieldsets(
         self,
