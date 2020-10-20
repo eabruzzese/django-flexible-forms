@@ -346,7 +346,7 @@ class FormsAdmin(FlexibleAdminMixin, ModelAdmin):
         model_name = Record._meta.model_name  # noqa: WPS437
 
         changelist_url = reverse(f"admin:{app_label}_{model_name}_changelist")
-        filtered_changelist_url = f"{changelist_url}?_form_id={form.pk}"
+        filtered_changelist_url = f"{changelist_url}?form_id={form.pk}"
         record_count = form.records__count  # type: ignore
 
         return mark_safe(
@@ -365,7 +365,7 @@ class FormsAdmin(FlexibleAdminMixin, ModelAdmin):
             reverse(
                 f"admin:{app_label}_{model_name}_add",
             )
-            + f"?_form_id={form.pk}"
+            + f"?form_id={form.pk}"
         )
 
         return mark_safe(
@@ -401,11 +401,11 @@ class RecordsAdmin(FlexibleAdminMixin, admin.ModelAdmin):
         return (
             super()
             .get_queryset(*args, **kwargs)
-            .select_related("_form")
+            .select_related("form")
             .prefetch_related(
-                "_form__fields__modifiers",
-                "_form__fieldsets__items__field",
-                "_attributes__field",
+                "form__fields__modifiers",
+                "form__fieldsets__items__field",
+                "attributes__field",
             )
         )
 
@@ -414,24 +414,27 @@ class RecordsAdmin(FlexibleAdminMixin, admin.ModelAdmin):
 
         Links to the change form for the form.
 
+        Args:
+            record: The record for which to render the form label.
+
         Returns:
             SafeText: The label of the record's form, linked to the change
                 page for that form.
         """
-        Form = record._form._flexible_model_for(BaseForm)
+        Form = record.form._flexible_model_for(BaseForm)
         app_label = Form._meta.app_label  # noqa: WPS437
         model_name = Form._meta.model_name  # noqa: WPS437
 
         change_url = reverse(
-            f"admin:{app_label}_{model_name}_change", args=(record._form.pk,)
+            f"admin:{app_label}_{model_name}_change", args=(record.form.pk,)
         )
 
         return mark_safe(
-            f'<a href="{change_url}">{record._form.label}</a>'
+            f'<a href="{change_url}">{record.form.label}</a>'
         )  # noqa: S308, S703, E501
 
     _form_label.short_description = "Form"  # type: ignore
-    _form_label.admin_order_field = "_form__label"  # type: ignore
+    _form_label.admin_order_field = "form__label"  # type: ignore
 
     def get_fieldsets(
         self,
@@ -450,7 +453,7 @@ class RecordsAdmin(FlexibleAdminMixin, admin.ModelAdmin):
 
         # If the record's form specifies a fieldsets configuration, use it.
         # Otherwise, default to Django admin behavior.
-        return cast("BaseRecord", obj)._form.as_django_fieldsets() or default_fieldsets
+        return cast("BaseRecord", obj).form.as_django_fieldsets() or default_fieldsets
 
     def get_form(
         self,
@@ -503,12 +506,12 @@ class RecordsAdmin(FlexibleAdminMixin, admin.ModelAdmin):
         Returns:
             HttpResponse: The HTTP response with the rendered view.
         """
-        form_id = request.GET.get("_form_id")
+        form_id = request.GET.get("form_id")
         Form = self.model._flexible_model_for(BaseForm)
 
         if form_id:
             record = self.model._default_manager.create(
-                _form=Form._default_manager.get(pk=form_id),
+                form=Form._default_manager.get(pk=form_id),
             )
 
             app_label = record._meta.app_label  # noqa: WPS437

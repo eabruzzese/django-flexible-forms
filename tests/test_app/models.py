@@ -71,8 +71,8 @@ class AppRecord(app_forms.BaseRecord, CustomBaseModel):
     """A customized version of the Record provided by flexible_forms."""
 
     class FlexibleMeta:
-        _form_field_name = "app_form"
-        _form_field_related_name = "app_records"
+        form_field_name = "app_form"
+        form_field_related_name = "app_records"
 
 
 class AppRecordAttribute(app_forms.BaseRecordAttribute, CustomBaseModel):

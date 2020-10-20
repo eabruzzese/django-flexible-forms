@@ -25,9 +25,11 @@ repos:
             tests/manage\.py|
             tests/test_project/*|
             tests/test_app/[^\/]+.py|
+            tests/test_app/tests/factories\.py|
             tests/test_app/management/[^\/]+.py|
             tests/test_app/management/commands/[^\/]+.py|
-            tests/test_app/tests/factories\.py
+            tests/quiz_builder/[^\/]+.py|
+            tests/quiz_builder/tests/factories\.py
           )
       - id: no-commit-to-branch
         args: ["--branch", "master"]

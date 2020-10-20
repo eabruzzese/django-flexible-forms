@@ -19,7 +19,7 @@ class BaseRecordForm(forms.ModelForm):
     """
 
     class Meta:
-        fields = ("_form",)
+        fields = ("form",)
         model: "BaseRecord"
 
     def __init__(
@@ -34,30 +34,30 @@ class BaseRecordForm(forms.ModelForm):
 
         # Extract the form definition from the given data, the instance, or the
         # initial values.
-        self._form = (
-            (data or {}).get("_form")
-            or getattr(instance, "_form", None)
-            or (initial or {}).get("_form")
+        self.form = (
+            (data or {}).get("form")
+            or getattr(instance, "form", None)
+            or (initial or {}).get("form")
         )
 
-        # In some situations, the _form might be a ModelChoiceIteratorValue
+        # In some situations, the form might be a ModelChoiceIteratorValue
         # that needs to be unpacked.
-        form_instance = getattr(self._form, "instance", None)
+        form_instance = getattr(self.form, "instance", None)
         if isinstance(form_instance, BaseForm):
-            self._form = form_instance
+            self.form = form_instance
 
         # If no record instance was given, create a new (empty) one and use its
         # data for the initial form values.
-        instance = instance or opts.model(_form=self._form)
-        initial = {**instance._data, **(initial or {}), "_form": self._form}
+        instance = instance or opts.model(form=self.form)
+        initial = {**instance._data, **(initial or {}), "form": self.form}
 
         super().__init__(
             data=data, files=files, instance=instance, initial=initial, **kwargs
         )
 
-        if self._form:
-            self.fields["_form"].disabled = True
-            self.fields["_form"].widget = HiddenInput()
+        if self.form:
+            self.fields["form"].disabled = True
+            self.fields["form"].widget = HiddenInput()
 
     def clean(self) -> Dict[str, Any]:
         """Clean the form data before saving."""

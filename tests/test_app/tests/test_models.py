@@ -423,7 +423,7 @@ def test_form_lifecycle() -> None:
     record_count = AppRecord.objects.count()
     unpersisted_record = django_form.save(commit=False)
     cleaned_record_data = django_form.cleaned_data
-    del cleaned_record_data["_form"]
+    del cleaned_record_data["form"]
     assert unpersisted_record._data == cleaned_record_data
     assert AppRecord.objects.count() == record_count
 
@@ -436,7 +436,7 @@ def test_form_lifecycle() -> None:
     # Recreating the form from the persisted record should produce a valid,
     # unchanged form. Calling save() on the form should noop.
     same_form = persisted_record.as_django_form(field_values)
-    assert same_form.initial == {**persisted_record._data, "_form": form}
+    assert same_form.initial == {**persisted_record._data, "form": form}
     assert same_form.is_valid(), same_form.errors
     assert not same_form.has_changed(), same_form.changed_data
     same_record = same_form.save()
@@ -588,7 +588,7 @@ def test_record(
                 data.draw(from_form(type(form.as_django_form()))),
             )
 
-        django_form.data["_form"] = form
+        django_form.data["form"] = form
 
         # Set the files attribute (file fields are read from here).
         django_form.files = {
@@ -609,7 +609,7 @@ def test_record(
         assert str(record) == f"{form.label} {record.pk}"
         assert str(AppRecord()) == f"New Record"
 
-        sample_attribute = record._attributes.first()
+        sample_attribute = record.attributes.first()
         assert (
             str(sample_attribute)
             == f"RecordAttribute {sample_attribute.pk} (record_id={sample_attribute.record_id}, field_id={sample_attribute.field_id})"
@@ -696,7 +696,7 @@ def test_record_queries(django_assert_num_queries) -> None:
             for field_type in FIELD_TYPES.keys()
         )
 
-        record = AppRecord.objects.create(_form=form)
+        record = AppRecord.objects.create(form=form)
         for field in form.fields.all():
             setattr(record, field.name, None)
         record.save()
@@ -718,11 +718,11 @@ def test_record_queries(django_assert_num_queries) -> None:
     # perspective of Record instances (which is what most implementations will
     # be interacting with most of the time in e.g. views):
     #
-    #   1. One to fetch the list of records; this should include a prefetch of its _form.
-    #   2. One to fetch the list of the fields on the record's _form.
-    #   3. One to fetch the list of field modifiers fields on the record's _form.
-    #   4. One to fetch the list of fieldsets for each record's _form.
-    #   5. One to fetch the list of _attributes for all of the records.
+    #   1. One to fetch the list of records; this should include a prefetch of its form.
+    #   2. One to fetch the list of the fields on the record's form.
+    #   3. One to fetch the list of field modifiers fields on the record's form.
+    #   4. One to fetch the list of fieldsets for each record's form.
+    #   5. One to fetch the list of attributes for all of the records.
     #
     with django_assert_num_queries(5):
         records = list(AppRecord.objects.all())
@@ -734,17 +734,17 @@ def test_record_queries(django_assert_num_queries) -> None:
             assert record._data != {}
 
     # Validating an existing record against its Django form with no changes
-    # should require only the queries needed to validate that the _form is
+    # should require only the queries needed to validate that the form is
     # still a valid Form instance.
     with django_assert_num_queries(2):
         record = records[0]
-        django_form = record._form.as_django_form(data={}, instance=record)
+        django_form = record.form.as_django_form(data={}, instance=record)
         assert django_form.is_valid(), django_form.errors
 
     # Updating a record using a Django form should require these queries:
     #
     #   * Two SELECTs as part of form validation, both used to check that the
-    #     value of the _form field is valid.
+    #     value of the form field is valid.
     #   * A SAVEPOINT query before saving the model.
     #   * A single query to update the Record itself.
     #   * A single bulk_update query to update the attributes that have changed.
@@ -756,7 +756,7 @@ def test_record_queries(django_assert_num_queries) -> None:
             f"{SingleLineTextField.name()}_field": "new_value",
             f"{MultiLineTextField.name()}_field": "another\nnew\nvalue",
         }
-        django_form = record._form.as_django_form(
+        django_form = record.form.as_django_form(
             instance=record, data=new_record_values
         )
         assert django_form.is_valid(), django_form.errors
@@ -838,13 +838,13 @@ def test_flexible_forms_partial_groups() -> None:
 
     class PartialRecord(test_ff.BaseRecord):
         class Meta:
-            indexes = [models.Index(fields=("_form",))]
+            indexes = [models.Index(fields=("form",))]
             constraints = [
-                models.UniqueConstraint(fields=("_form", "id"), name="test_constraint")
+                models.UniqueConstraint(fields=("form", "id"), name="test_constraint")
             ]
 
         class FlexibleMeta(test_ff.BaseRecord.FlexibleMeta):
-            _form_field_name = "form_alias"
+            form_field_name = "form_alias"
 
     # Calling make_flexible on a partial group should "fill in the gaps" and
     # generate models for any of the missing flexible form components.

@@ -478,7 +478,7 @@ class BaseForm(FlexibleBaseModel):
                     f.name: f.initial if isinstance(f.initial, list) else [f.initial]
                     for f in self.fields.all()
                 },
-                "_form": [self],
+                "form": [self],
             }
         )
 
@@ -623,7 +623,7 @@ class BaseForm(FlexibleBaseModel):
             },
         )
 
-        initial = {"_form": self, **(initial or {})}
+        initial = {"form": self, **(initial or {})}
 
         # Create a form instance from the form class and the passed parameters.
         form_instance = form_class(
@@ -1019,14 +1019,14 @@ class RecordManager(models.Manager):
             (
                 super()
                 .get_queryset()
-                .select_related("_form")
+                .select_related("form")
                 .prefetch_related(
-                    f"_form__fields",
-                    f"_form__fields__modifiers",
-                    f"_form__fieldsets",
-                    f"_form__fieldsets__items",
+                    f"form__fields",
+                    f"form__fields__modifiers",
+                    f"form__fieldsets",
+                    f"form__fieldsets__items",
                     Prefetch(
-                        "_attributes",
+                        "attributes",
                         queryset=RecordAttribute.objects.select_related("field"),
                     ),
                 )
@@ -1049,17 +1049,17 @@ class BaseRecord(FlexibleBaseModel):
     names.
     """
 
-    _form: "models.ForeignKey[BaseForm, BaseForm]" = FlexibleForeignKey(
+    form: "models.ForeignKey[BaseForm, BaseForm]" = FlexibleForeignKey(
         BaseForm, on_delete=models.CASCADE, related_name="records"
     )
-    _form_id: Optional[int]
-    _attributes: "models.BaseManager[BaseRecordAttribute]"
+    form_id: Optional[int]
+    attributes: "models.BaseManager[BaseRecordAttribute]"
 
     objects = RecordManager()
 
     # The _initialized flag is used to determine if the model instance has been
     # fully initialized by Django. We use the flag to determine if it's safe to
-    # start proxying __getattr__ and __setattr__ calls to our _attributes
+    # start proxying __getattr__ and __setattr__ calls to our attributes
     # association (which breaks if the instanec is not fully initialized).
     _initialized: bool = False
 
@@ -1072,26 +1072,26 @@ class BaseRecord(FlexibleBaseModel):
         abstract = True
 
     class FlexibleMeta:
-        _form_field_name = "_form"
-        _form_field_related_name = "records"
+        form_field_name = "form"
+        form_field_related_name = "records"
 
     def __str__(self) -> str:
         # If we can get the name of the record's form without making a database
         # call, do it so we can make the __str__ more descriptive. Otherise,
         # just call it a "Record".
         record_type = (
-            self._form.label
-            if self.__dict__.get("_form")
-            or self._meta.get_field("_form").get_cached_value(self)
+            self.form.label
+            if self.__dict__.get("form")
+            or self._meta.get_field("form").get_cached_value(self)
             else "Record"
         )
 
         return f"New {record_type}" if not self.pk else f"{record_type} {self.pk}"
 
     def __init__(
-        self, *args: Any, _form: Optional[BaseForm] = None, **kwargs: Any
+        self, *args: Any, form: Optional[BaseForm] = None, **kwargs: Any
     ) -> None:
-        super().__init__(*args, _form=_form, **kwargs)
+        super().__init__(*args, form=form, **kwargs)
         self._staged_changes = {}
         self._initialized = True
 
@@ -1108,7 +1108,7 @@ class BaseRecord(FlexibleBaseModel):
             BaseRecordForm: A configured Django form for the record.
         """
         kwargs = {"instance": self, **kwargs}
-        return self._form.as_django_form(*args, **kwargs)
+        return self.form.as_django_form(*args, **kwargs)
 
     @cached_property
     def _fields(self) -> Mapping[str, BaseField]:
@@ -1118,9 +1118,9 @@ class BaseRecord(FlexibleBaseModel):
             Mapping[str, BaseField]: A mapping of Field instances by their
                 names.
         """
-        if not hasattr(self, "_form"):
+        if not hasattr(self, "form"):
             return {}
-        return {f.name: f for f in self._form.fields.all()}
+        return {f.name: f for f in self.form.fields.all()}
 
     @cached_property
     def _data(self) -> Mapping[str, Any]:
@@ -1132,11 +1132,7 @@ class BaseRecord(FlexibleBaseModel):
         initial_values = {name: field.initial for name, field in self._fields.items()}
         attribute_values = cast(
             Dict[str, Any],
-            (
-                {a.field.name: a.value for a in self._attributes.all()}
-                if self.pk
-                else {}
-            ),
+            ({a.field.name: a.value for a in self.attributes.all()} if self.pk else {}),
         )
         staged_attributes = {k: v for k, v in self._staged_changes.items()}
 
@@ -1230,7 +1226,7 @@ class BaseRecord(FlexibleBaseModel):
 
         # Upsert the record attributes.
         RecordAttribute = cast(Any, self._flexible_model_for(BaseRecordAttribute))
-        attribute_map = {a.field.name: a for a in self._attributes.all()}
+        attribute_map = {a.field.name: a for a in self.attributes.all()}
 
         value_fields: Set[str] = set()
         update: List[BaseRecordAttribute] = []
@@ -1278,7 +1274,7 @@ class BaseRecordAttribute(FlexibleBaseModel):
     record: "models.ForeignKey[BaseRecord, BaseRecord]" = FlexibleForeignKey(
         BaseRecord,
         on_delete=models.CASCADE,
-        related_name="_attributes",
+        related_name="attributes",
     )
     record_id: Optional[int]
 
@@ -1296,7 +1292,7 @@ class BaseRecordAttribute(FlexibleBaseModel):
         field_field_name = "field"
         field_field_related_name = "attributes"
         record_field_name = "record"
-        record_field_related_name = "_attributes"
+        record_field_related_name = "attributes"
 
     def __str__(self) -> str:
         return f"RecordAttribute {self.pk} (record_id={self.record_id}, field_id={self.field_id})"
@@ -1412,8 +1408,8 @@ class FlexibleForms:
         grade = models.PositiveIntegerField()
 
         class FlexibleMeta:
-            _form_field_name = "quiz"
-            _form_field_related_name = "submissions"
+            form_field_name = "quiz"
+            form_field_related_name = "submissions"
     ```
 
     ```python

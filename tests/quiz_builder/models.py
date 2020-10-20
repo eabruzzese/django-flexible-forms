@@ -56,7 +56,8 @@ class QuizSectionItem(quiz_forms.BaseFieldsetItem, CustomBaseModel):
 
 
 class QuizQuestionModifier(quiz_forms.BaseFieldModifier, CustomBaseModel):
-    """A dynamic question modifier for a quiz (e.g., show/hide a question based on the answer to another question)."""
+    """A dynamic question modifier for a quiz (e.g., show/hide a question based
+    on the answer to another question)."""
 
     class FlexibleMeta:
         # Different field name, original related_name.
@@ -69,11 +70,11 @@ class QuizSubmission(quiz_forms.BaseRecord, CustomBaseModel):
 
     class FlexibleMeta:
         # Different field name and related_name.
-        _form_field_name = "quiz"
-        _form_field_related_name = "submissions"
+        form_field_name = "quiz"
+        form_field_related_name = "submissions"
 
 
-class Answer(quiz_forms.BaseRecordAttribute, CustomBaseModel):
+class QuizAnswer(quiz_forms.BaseRecordAttribute, CustomBaseModel):
     """A single answer on a submitted quiz."""
 
     class FlexibleMeta:
