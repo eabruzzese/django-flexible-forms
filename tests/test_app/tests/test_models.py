@@ -50,7 +50,7 @@ def test_form() -> None:
     assert form.name == ""
 
     # Ensure the form has a friendly string representation
-    assert str(form) == "New Form"
+    assert str(form) == "Untitled AppForm"
 
     # Ensure that a name is generated for the form upon save.
     form.label = "Test Form"

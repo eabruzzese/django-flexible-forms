@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "django_extensions",
     "flexible_forms",
     "test_app.apps.TestAppConfig",
+    "quiz_builder.apps.QuizBuilderConfig",
 ]
 
 MIDDLEWARE = [

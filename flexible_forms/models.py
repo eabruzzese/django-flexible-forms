@@ -309,14 +309,18 @@ class FlexibleRelation(ForeignObject):
         )
         super().contribute_to_class(cls, field_name, private_only=private_only)
 
-        # If the field name or related name configured in the FlexibleMeta
-        # differs from the original name, add an alias field so that this field
-        # can be accessed transparently from either property.
+        # If the field name configured in the FlexibleMeta differs from the
+        # original name, add an alias field so that this field can be accessed
+        # transparently from either property.
         if field_name != self.original_field_name:
+            alias_related_name = self.original_related_name
+            if alias_related_name == related_name:
+                alias_related_name = f"{alias_related_name}+"
+
             alias_field = AliasField(
                 original_field=self,
                 to=to_concrete_model,
-                related_name=self.original_related_name,
+                related_name=alias_related_name,
             )
             alias_field.contribute_to_class(
                 cls, self.original_field_name, private_only=True
@@ -429,6 +433,11 @@ def register_flexible_model(sender: Type[models.Model], **kwargs: Any) -> None:
 class BaseForm(FlexibleBaseModel):
     """A model representing a single type of customizable form."""
 
+    label = models.TextField(
+        blank=True,
+        default="",
+        help_text="The human-friendly name of the form.",
+    )
     name = models.TextField(
         blank=True,
         help_text=(
@@ -436,12 +445,6 @@ class BaseForm(FlexibleBaseModel):
             "from the label if not specified."
         ),
     )
-    label = models.TextField(
-        blank=True,
-        default="",
-        help_text="The human-friendly name of the form.",
-    )
-    description = models.TextField(blank=True, default="")
 
     fields: "models.BaseManager[BaseField]"
     fieldsets: "models.BaseManager[BaseFieldset]"
@@ -451,7 +454,7 @@ class BaseForm(FlexibleBaseModel):
         abstract = True
 
     def __str__(self) -> str:
-        return self.label or "New Form"
+        return self.label or f"Untitled {self.__class__.__name__}"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save the model.
@@ -656,7 +659,7 @@ class BaseField(FlexibleBaseModel):
     label_suffix = models.TextField(
         blank=True,
         default="",
-        help_text=('The character(s) at the end of the field label (e.g. "?" or ":").'),
+        help_text='The character(s) at the end of the field label (e.g. "?" or ":").',
     )
 
     help_text = models.TextField(
@@ -978,7 +981,10 @@ class BaseFieldsetItem(FlexibleBaseModel):
     class Meta:
         abstract = True
         ordering = ["vertical_order", "horizontal_order"]
-        unique_together = ("fieldset", "vertical_order", "horizontal_order")
+        unique_together = (
+            ("fieldset", "field"),
+            ("fieldset", "vertical_order", "horizontal_order"),
+        )
 
     class FlexibleMeta:
         field_field_name = "field"
