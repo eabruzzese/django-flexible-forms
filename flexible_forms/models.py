@@ -24,7 +24,11 @@ from typing import (
 )
 
 from django import forms
-from django.core.exceptions import ImproperlyConfigured, ValidationError
+from django.core.exceptions import (
+    ImproperlyConfigured,
+    ObjectDoesNotExist,
+    ValidationError,
+)
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models, transaction
 from django.db.models.fields.mixins import FieldCacheMixin
@@ -843,18 +847,33 @@ class BaseFieldModifier(FlexibleBaseModel):
         super().clean()
         self._validated = False
 
-        # No field? No Problem!
-        if not hasattr(self, "field"):
+        # We can only validate the expression if the modifier has been
+        # associated with a field and its form (we need to get the initial
+        # values from the form to test the expression).
+        try:
+            field_values = self.field.form.initial_values.dict()
+        except ObjectDoesNotExist:
             return
 
         # Validate that the expression is valid for the form. This is
         # accomplished by building a dict of initial values for all fields on
-        # the form and running it through the expression evaluator. If any
+        # the form (along with the initial values for concrete attributes on
+        # the Record) and running it through the expression evaluator. If any
         # exceptions are raised, they are returned as validation errors.
-        field_values = {f.name: f.initial for f in self.field.form.fields.all()}
+        Record = self.flexible_forms.get_model(BaseRecord)
+        record_attributes = {
+            str(f.attname): f.value_from_object(Record())  # type: ignore
+            for f in Record._meta.get_fields()
+            if hasattr(f, "attname") and hasattr(f, "value_from_object")
+        }
+
+        expression_context: Mapping[str, Any] = {
+            "meta": record_attributes,
+            **field_values,
+        }
 
         try:
-            evaluate_expression(self.expression, names=field_values)
+            evaluate_expression(self.expression, names=expression_context)
 
         # If the expression references a name that isn't a field on the form
         # (or a builtin), raise a validation error.
