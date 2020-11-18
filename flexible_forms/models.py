@@ -46,7 +46,7 @@ from django.utils.functional import cached_property
 from django.utils.text import slugify
 from simpleeval import FunctionNotDefined, NameNotDefined
 
-from flexible_forms.fields import FIELD_TYPES
+from flexible_forms.fields import FIELD_TYPES, FieldType
 from flexible_forms.utils import (
     FormEvaluator,
     evaluate_expression,
@@ -585,11 +585,12 @@ class BaseForm(FlexibleBaseModel):
         }
         for field_name, form_field in form_fields.items():
             field_widget = cast(Widget, form_field.widget)
-            field_value = field_widget.value_from_datadict(
-                data=form_state,  # type: ignore
-                files=form_state,
-                name=field_name,
-            )
+            # field_value = field_widget.value_from_datadict(
+            #     data=form_state,  # type: ignore
+            #     files=form_state,
+            #     name=field_name,
+            # )
+            field_value = form_state.get(field_name)
             # Try to perform as much of the value coercion process as possible
             # while attempting to avoid running expensive validators.
             try:
@@ -740,36 +741,55 @@ class BaseField(FlexibleBaseModel):
 
         super().save(*args, **kwargs)
 
+    def as_field_type(self) -> Type[FieldType]:
+        """Return the flexible FieldType for the field.
+
+        Returns:
+            FieldType: The FieldType class for the field.
+        """
+        return FIELD_TYPES[self.field_type]
+
     def as_form_field(
         self,
         field_values: Optional[Mapping[str, Any]] = None,
     ) -> forms.Field:
-        """Return a Django form Field definition.
+        """Return a Django form Field instance.
 
         Args:
-            field_values: The current values of
-                all fields in the form.
+            field_values: The current values of all fields in the form.
 
         Returns:
             forms.Field: The configured Django form Field instance.
         """
-        return FIELD_TYPES[self.field_type].as_form_field(
+        return self.as_field_type().as_form_field(
             **{
                 # Special parameters.
+                "field": self,
                 "modifiers": (
-                    (m.attribute, m.expression)
-                    for m in self.modifiers.all()  # type: ignore
+                    (m.attribute, m.expression) for m in self.modifiers.all()
                 ),
                 "field_values": field_values,
-                "form_widget_options": self.form_widget_options,
                 # Django form field arguments.
                 "required": self.required,
                 "label": self.label,
                 "label_suffix": self.label_suffix,
                 "initial": self.initial,
                 "help_text": self.help_text,
+                "widget": self.as_form_widget(),
                 **self.form_field_options,
             }
+        )
+
+    def as_form_widget(self) -> Widget:
+        """Return a Django form Widget instance.
+
+        Uses the form_widget_options and the given field_values to customize the widget.
+
+        Returns:
+            Widget: The configured Django form Widget instance.
+        """
+        return self.as_field_type().as_form_widget(
+            field=self, **self.form_widget_options
         )
 
     def as_model_field(self) -> models.Field:
@@ -778,7 +798,7 @@ class BaseField(FlexibleBaseModel):
         Returns:
             models.Field: The configured Django model Field instance.
         """
-        return FIELD_TYPES[self.field_type].as_model_field(
+        return self.as_field_type().as_model_field(
             null=not self.required,
             blank=not self.required,
             default=self.initial,
@@ -878,7 +898,7 @@ class BaseFieldModifier(FlexibleBaseModel):
         # If the expression references a name that isn't a field on the form
         # (or a builtin), raise a validation error.
         except NameNotDefined as ex:
-            valid_fields = ", ".join(field_values.keys())
+            valid_fields = ", ".join(expression_context.keys())
             name = getattr(ex, "name", "")
             raise ValidationError(
                 {
@@ -1383,10 +1403,10 @@ class BaseRecordAttribute(FlexibleBaseModel):
 # storage by creating a column of an appropriate datatype for each supported
 # field.
 #
-for field_type, field in sorted(FIELD_TYPES.items(), key=lambda f: f[0]):
+for field_type_name, field_type in sorted(FIELD_TYPES.items(), key=lambda f: f[0]):
     BaseRecordAttribute.add_to_class(  # type: ignore
-        BaseRecordAttribute.get_value_field_name(field_type),
-        field.as_model_field(blank=True, null=True, default=None),
+        BaseRecordAttribute.get_value_field_name(field_type_name),
+        field_type.as_model_field(blank=True, null=True, default=None),
     )
 
 

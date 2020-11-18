@@ -24,6 +24,7 @@ from django.urls.conf import include
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("_nested_admin/", include("nested_admin.urls")),
+    path("_flexible_forms/", include("flexible_forms.urls")),
     # Enable django-debug-toolbar
     path("__debug__/", include(debug_toolbar.urls)),
     # Serve uploaded files (for testing file-related fields).

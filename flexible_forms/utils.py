@@ -2,13 +2,13 @@
 
 """Common utilities."""
 
+import json
 from typing import (
     TYPE_CHECKING,
     Any,
     List,
     Mapping,
     Optional,
-    Set,
     Tuple,
     Type,
     TypeVar,
@@ -37,22 +37,6 @@ if TYPE_CHECKING:  # pragma: no cover
     ]
 
 T = TypeVar("T", bound=Type)
-
-
-def all_subclasses(cls: T) -> Set[T]:
-    """Return a set of subclasses for the given class.
-
-    Recurses through the class hierarchy to find all descendants.
-
-    Args:
-        cls: The class for which to find all subclasses.
-
-    Returns:
-        Set[T]: The set of all descendants of `cls`.
-    """
-    return set(cls.__subclasses__()).union(
-        [s for c in cls.__subclasses__() for s in all_subclasses(c)]
-    )
 
 
 def empty(value: Any) -> bool:
@@ -150,3 +134,18 @@ def replace_element(
             element = replace_element(needle, replacement, element)
         elements = type(haystack)([*elements, element])
     return elements
+
+
+def stable_json(data: Union[dict, list]) -> str:
+    """Generate a stable string representation of the given dict or list.
+
+    Args:
+        data: The dict or list for which to produce a stable JSON
+            representation.
+
+    Returns:
+        str: A stable JSON string representation of the given data.
+    """
+    return json.dumps(
+        data, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str
+    )

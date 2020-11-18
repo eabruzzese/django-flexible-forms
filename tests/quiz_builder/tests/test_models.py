@@ -84,14 +84,14 @@ def test_quiz_relations() -> None:
 def test_quiz_initial_values() -> None:
     quiz = QuizFactory()
     question_1 = QuizQuestionFactory(
-        quiz=quiz, field_type=SingleLineTextField.name(), initial="Testing"
+        quiz=quiz, field_type=SingleLineTextField.name, initial="Testing"
     )
     question_2 = QuizQuestionFactory(
-        quiz=quiz, field_type=PositiveIntegerField.name(), initial=123
+        quiz=quiz, field_type=PositiveIntegerField.name, initial=123
     )
     question_3 = QuizQuestionFactory(
         quiz=quiz,
-        field_type=MultipleChoiceCheckboxField.name(),
+        field_type=MultipleChoiceCheckboxField.name,
         initial=["first", "second"],
     )
 
@@ -115,14 +115,14 @@ def test_quiz_as_django_fieldsets() -> None:
     quiz = QuizFactory()
 
     question_1 = QuizQuestionFactory(
-        quiz=quiz, field_type=SingleLineTextField.name(), initial="Testing"
+        quiz=quiz, field_type=SingleLineTextField.name, initial="Testing"
     )
     question_2 = QuizQuestionFactory(
-        quiz=quiz, field_type=PositiveIntegerField.name(), initial=123
+        quiz=quiz, field_type=PositiveIntegerField.name, initial=123
     )
     question_3 = QuizQuestionFactory(
         quiz=quiz,
-        field_type=MultipleChoiceCheckboxField.name(),
+        field_type=MultipleChoiceCheckboxField.name,
         initial=["first", "second"],
     )
 

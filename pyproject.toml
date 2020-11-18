@@ -13,6 +13,8 @@ django = ">=2.2"
 importlib-metadata = {version = "^1.7.0", python = "<3.8"}
 python = "^3.6"
 simpleeval = "^0.9.10"
+requests = "^2.24.0"
+jmespath = "^0.10.0"
 
 [tool.poetry.dev-dependencies]
 Pillow = "^7.2.0"
@@ -39,6 +41,7 @@ pytest-mock = "^3.3.1"
 django-debug-toolbar = "^3.0"
 django-extensions = "^3.0.9"
 ipython = "<7.17"
+requests-mock = {extras = ["fixture"], version = "^1.8.0"}
 
 [tool.dephell.main]
 from = {format = "poetry", path = "pyproject.toml"}

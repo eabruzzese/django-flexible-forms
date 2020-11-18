@@ -73,7 +73,7 @@ def test_field() -> None:
     field = FieldFactory.build(
         form=FormFactory(),
         label=None,
-        field_type=SingleLineTextField.name(),
+        field_type=SingleLineTextField.name,
     )
 
     # Ensure that the field has no machine name until it gets saved to the
@@ -116,14 +116,14 @@ def test_field_modifier() -> None:
         form=form,
         name="field_1",
         label="Test Field 1",
-        field_type=SingleLineTextField.name(),
+        field_type=SingleLineTextField.name,
     )
 
     field_2 = FieldFactory(
         form=form,
         name="field_2",
         label="Test Field 2",
-        field_type=SingleLineTextField.name(),
+        field_type=SingleLineTextField.name,
     )
 
     modifier = field_2.modifiers.create(attribute="required", expression="True")
@@ -187,28 +187,28 @@ def test_fieldset() -> None:
         form=form,
         label="First name",
         name="first_name",
-        field_type=SingleLineTextField.name(),
+        field_type=SingleLineTextField.name,
     )
     last_name_field = FieldFactory(
         form=form,
         label="Last name",
         name="last_name",
-        field_type=SingleLineTextField.name(),
+        field_type=SingleLineTextField.name,
     )
 
     birth_date_field = FieldFactory(
         form=form,
         label="Birth date",
         name="birth_date",
-        field_type=DateTimeField.name(),
+        field_type=DateTimeField.name,
     )
 
     avatar_field = FieldFactory(
-        form=form, label="Avatar", name="avatar", field_type=FileUploadField.name()
+        form=form, label="Avatar", name="avatar", field_type=FileUploadField.name
     )
 
     bio_field = FieldFactory(
-        form=form, label="Bio", name="bio", field_type=MultiLineTextField.name()
+        form=form, label="Bio", name="bio", field_type=MultiLineTextField.name
     )
 
     # A form with no fieldsets should return an empty list for as_django_fieldsets().
@@ -296,7 +296,7 @@ def test_form_lifecycle() -> None:
         form=form,
         label="What... is your name?",
         name="name",
-        field_type=SingleLineTextField.name(),
+        field_type=SingleLineTextField.name,
         required=True,
     )
 
@@ -306,7 +306,7 @@ def test_form_lifecycle() -> None:
         form=form,
         label="What... is your quest?",
         name="quest",
-        field_type=MultiLineTextField.name(),
+        field_type=MultiLineTextField.name,
         required=True,
     )
     quest_field.modifiers.create(
@@ -320,7 +320,7 @@ def test_form_lifecycle() -> None:
         form=form,
         label="What... is your favorite color?",
         name="favorite_color",
-        field_type=SingleChoiceSelectField.name(),
+        field_type=SingleChoiceSelectField.name,
         form_field_options={
             "choices": (
                 ("blue", "Blue"),
@@ -453,7 +453,7 @@ def test_file_upload() -> None:
         form=form,
         label="Upload a file",
         name="file",
-        field_type=FileUploadField.name(),
+        field_type=FileUploadField.name,
         required=False,
     )
 
@@ -489,7 +489,7 @@ def test_initial_values() -> None:
         form=form,
         label="How many?",
         name="test_field",
-        field_type=IntegerField.name(),
+        field_type=IntegerField.name,
         required=True,
         initial=0,
     )
@@ -526,7 +526,7 @@ def test_noop_modifier_attribute() -> None:
         form=form,
         label="Are we testing?",
         name="test_field",
-        field_type=YesNoRadioField.name(),
+        field_type=YesNoRadioField.name,
         required=True,
     )
     modifier = field.modifiers.create(
@@ -753,8 +753,8 @@ def test_record_queries(django_assert_num_queries) -> None:
     with django_assert_num_queries(6):
         record = records[1]
         new_record_values = {
-            f"{SingleLineTextField.name()}_field": "new_value",
-            f"{MultiLineTextField.name()}_field": "another\nnew\nvalue",
+            f"{SingleLineTextField.name}_field": "new_value",
+            f"{MultiLineTextField.name}_field": "another\nnew\nvalue",
         }
         django_form = record.form.as_django_form(
             instance=record, data=new_record_values

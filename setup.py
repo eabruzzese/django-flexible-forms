@@ -26,6 +26,7 @@ setup(
     install_requires=[
         'django>=2.2',
         'importlib-metadata==1.*,>=1.7.0; python_version < "3.8"',
+        'jmespath==0.*,>=0.10.0', 'requests==2.*,>=2.24.0',
         'simpleeval==0.*,>=0.9.10'
     ],
     extras_require={
@@ -41,7 +42,8 @@ setup(
             "pytest==6.*,>=6.0.1", "pytest-cov==2.*,>=2.10.1",
             "pytest-django==3.*,>=3.9.0", "pytest-mock==3.*,>=3.3.1",
             "pytest-randomly==3.*,>=3.4.1", "pytest-timeout==1.*,>=1.4.2",
-            "sphinx==3.*,>=3.2.1", "sphinx-autoapi==1.*,>=1.5.0"
+            "requests-mock[fixture]==1.*,>=1.8.0", "sphinx==3.*,>=3.2.1",
+            "sphinx-autoapi==1.*,>=1.5.0"
         ]
     },
 )

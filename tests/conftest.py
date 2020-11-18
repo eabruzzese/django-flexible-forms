@@ -2,10 +2,12 @@
 
 """Pytest fixtures and configuration."""
 
+import json
 import uuid
 from contextlib import _GeneratorContextManager, contextmanager
 from datetime import timedelta
 from io import BytesIO
+from string import printable
 from typing import (
     Any,
     Callable,
@@ -220,6 +222,61 @@ def duration_strategy() -> st.SearchStrategy[timedelta]:
     return st.timedeltas()
 
 
+@st.composite
+def json_strategy(
+    draw: Any,
+    min_size=None,
+    allow_zero=True,
+    allow_none=True,
+    allow_bool=True,
+    allow_nan=True,
+    allow_infinity=True,
+) -> st.SearchStrategy[Any]:
+    strategies = st.text(printable, min_size=min_size) | st.floats(
+        allow_nan=allow_nan,
+        allow_infinity=allow_infinity,
+        min_value=float(not allow_zero),
+    )
+
+    if allow_bool:
+        strategies |= st.booleans()
+
+    if allow_none:
+        strategies |= st.none()
+
+    return draw(
+        st.recursive(
+            strategies,
+            lambda children: st.lists(children, min_size=1)
+            | st.dictionaries(st.text(printable), children, min_size=1),
+        )
+    )
+
+
+def json_field_strategy(field: forms.JSONField) -> str:
+    @st.composite
+    def _json_field_strategy(draw: Any, field=field) -> st.SearchStrategy[str]:
+        value = draw(
+            json_strategy(
+                min_size=int(field.required),
+                allow_none=not field.required,
+                allow_zero=not field.required,
+                allow_bool=False,
+                allow_nan=False,
+                allow_infinity=False,
+            )
+        )
+
+        if field.widget.allow_multiple_selected and not isinstance(value, list):
+            value = [value]
+
+        return json.dumps(
+            value, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str
+        )
+
+    return _json_field_strategy()
+
+
 @pytest.fixture(scope="session")
 def patch_field_strategies() -> ContextManagerFixture:
     """Return a monkey-patcher for Hypothesis field strategies."""
@@ -260,9 +317,6 @@ def patch_field_strategies() -> ContextManagerFixture:
     return _patch_field_strategy
 
 
-_hypothesis_initialized = False
-
-
 def _initialize_hypothesis() -> None:
     """Performs initialization for Hypothesis.
 
@@ -280,6 +334,8 @@ def _initialize_hypothesis() -> None:
         register_field_strategy(forms.FileField, file_strategy())
         register_field_strategy(models.ImageField, image_strategy())
         register_field_strategy(forms.ImageField, image_strategy())
+
+        _global_field_lookup[forms.JSONField] = json_field_strategy
     except InvalidArgument:
         pass
 
