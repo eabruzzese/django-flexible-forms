@@ -10,9 +10,9 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
-    TypedDict,
     Union,
 )
+from typing_extensions import TypedDict
 
 from django.contrib.admin.widgets import AutocompleteMixin
 from django.forms.widgets import Select
