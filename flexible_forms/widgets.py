@@ -6,7 +6,6 @@ from typing import (
     Dict,
     Iterable,
     List,
-    Literal,
     Mapping,
     Optional,
     Sequence,
@@ -49,7 +48,7 @@ class AutocompleteSelect(Select):
 
     def optgroups(
         self, name: str, value: List[str], *args: Any, **kwargs: Any
-    ) -> List[Tuple[None, List[Dict[str, Any]], Literal[0]]]:
+    ) -> List[Tuple[None, List[Dict[str, Any]], int]]:
         """Build a list of optgroups for populating the select.
 
         Autocompletes are powered by external endpoints, and so the selected
@@ -70,7 +69,7 @@ class AutocompleteSelect(Select):
             List[Tuple[Optional[str], List[Tuple[Any, Any]], int]]: Optgroups
                 for the widget.
         """
-        default: Tuple[None, List[Dict[str, Any]], Literal[0]] = (None, [], 0)
+        default: Tuple[None, List[Dict[str, Any]], int] = (None, [], 0)
         groups = [default]
         has_selected = False
 
