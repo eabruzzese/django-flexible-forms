@@ -12,10 +12,10 @@ from typing import (
     Tuple,
     Union,
 )
-from typing_extensions import TypedDict
 
 from django.contrib.admin.widgets import AutocompleteMixin
 from django.forms.widgets import Select
+from typing_extensions import TypedDict
 
 from flexible_forms.utils import stable_json
 
