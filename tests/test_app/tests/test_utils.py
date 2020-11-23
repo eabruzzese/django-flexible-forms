@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from flexible_forms.utils import empty, replace_element
+from flexible_forms.utils import LenientFormatter, empty, replace_element
 
 
 def test_empty() -> None:
@@ -41,3 +41,27 @@ def test_replace_element() -> None:
     )
 
     assert replace_element(needle, replacement, haystack) == expected_result
+
+
+def test_lenient_formatter() -> None:
+    """Ensure that the LenientFormatter behaves as expected."""
+    formatter = LenientFormatter()
+
+    assert (
+        formatter.format("Missing indexes are blank: {0}")
+        == "Missing indexes are blank: "
+    )
+    assert (
+        formatter.format("Supplied indexes are interpolated: {0}", "zero")
+        == "Supplied indexes are interpolated: zero"
+    )
+    assert (
+        formatter.format("Missing keywords are blank: {keyword}")
+        == "Missing keywords are blank: "
+    )
+    assert (
+        formatter.format(
+            "Supplied keywords are interpolated: {keyword}", keyword="keyword"
+        )
+        == "Supplied keywords are interpolated: keyword"
+    )

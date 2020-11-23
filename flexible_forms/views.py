@@ -30,14 +30,13 @@ def autocomplete(
     field = get_object_or_404(field_model, pk=field_pk)
     field_type = cast(AutocompleteSelectField, field.as_field_type())
 
-    search_term = request.GET.get("term")
     page = int(request.GET.get("page", 1))
     per_page = int(
         request.GET.get("per_page", field.form_widget_options.get("per_page", 100))
     )
 
     search_results, has_more = field_type.autocomplete(
-        term=search_term,
+        request=request,
         page=page,
         **{
             **field.form_widget_options,

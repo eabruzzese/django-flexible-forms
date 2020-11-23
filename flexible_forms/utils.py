@@ -9,6 +9,7 @@ from typing import (
     List,
     Mapping,
     Optional,
+    Sequence,
     Tuple,
     Type,
     TypeVar,
@@ -149,3 +150,42 @@ def stable_json(data: Union[dict, list]) -> str:
     return json.dumps(
         data, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str
     )
+
+
+from string import Formatter
+
+
+class LenientFormatter(Formatter):
+    """A more lenient version of the default string formatter.
+
+    If a given variable was not specified in the format() kwargs, its value will be an empty string.
+
+    For example:
+
+    >>> formatter = LenientFormatter()
+    >>> test_string = "This variable was not provided: {not_provided}, but this one was: {provided}."
+    >>> formatter.format(test_string, provided="a value")
+    >>> 'This variable was not provided: , but this one was: a value.'
+    """
+
+    def get_value(
+        self, key: Union[int, str], args: Sequence[Any], kwargs: Mapping[str, Any]
+    ) -> Any:
+        """Return the value for the given key from the args or kwargs.
+
+        If the key does not exist in the args or kwargs, an empty string is
+        returned.
+
+        Args:
+            key: The name of the string variable for which to resolve the
+                value.
+            args: Positional arguments given to format().
+            kwargs: keyword arguments given to format().
+
+        Returns:
+            Any: The value for key, if given, otherwise an empty string.
+        """
+        try:
+            return super().get_value(key, args, kwargs)
+        except (KeyError, IndexError):
+            return ""

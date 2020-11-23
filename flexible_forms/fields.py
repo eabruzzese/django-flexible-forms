@@ -24,6 +24,7 @@ from django.db.models import FileField, ImageField
 from django.db.models import fields as model_fields
 from django.forms import fields as form_fields
 from django.forms import widgets as form_widgets
+from django.http.request import HttpRequest
 from django.urls import reverse
 
 from flexible_forms.widgets import (
@@ -39,7 +40,11 @@ except ImportError:  # pragma: no cover
     from django.contrib.postgres.fields import JSONField
     from django.contrib.postgres.forms import JSONField as JSONFormField
 
-from flexible_forms.utils import evaluate_expression, stable_json
+from flexible_forms.utils import (
+    LenientFormatter,
+    evaluate_expression,
+    stable_json,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -668,7 +673,7 @@ class AutocompleteSelectField(FieldType):
     @classmethod
     def autocomplete(
         cls,
-        term: Optional[str] = None,
+        request: HttpRequest,
         per_page: Optional[int] = None,
         page: Optional[int] = None,
         **form_widget_options: Any,
@@ -679,7 +684,7 @@ class AutocompleteSelectField(FieldType):
         within a select form element.
 
         Args:
-            term: The search term.
+            request: The HTTP request.
             per_page: The number of search results per page.
             page: The 1-based page number for pagination.
             form_widget_options: A dict of form widget options that can be
@@ -691,7 +696,6 @@ class AutocompleteSelectField(FieldType):
                 a boolean indicating whether or not there are more results to
                 fetch.
         """
-        term = term or ""
         per_page = per_page or 100
         page = page or 1
 
@@ -710,7 +714,9 @@ class AutocompleteSelectField(FieldType):
 
         # Search the endpoint and raise an exception if we get any non-success
         # status in the response.
-        response = requests.get(url.format(term=term, page=page, per_page=per_page))
+        url_formatter = LenientFormatter()
+        formatted_url = url_formatter.format(url, **request.GET)
+        response = requests.get(formatted_url)
         response.raise_for_status()
 
         # Decode the JSON response.
