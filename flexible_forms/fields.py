@@ -748,8 +748,8 @@ class AutocompleteSelectField(FieldType):
         # Render the URL as a Django Template, feeding it the current field
         # values, the record instance ("meta"), and the GET parameters.
         url_template = Template(url)
-        rendered_url = url_template.render(
-            Context({"record": record, **request.GET.dict()})
+        rendered_url = request.build_absolute_uri(
+            url_template.render(Context({"record": record, **request.GET.dict()}))
         )
 
         # Get a set of all variable names used in the template so that we can

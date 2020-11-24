@@ -285,9 +285,7 @@ class FlexibleRelation(ForeignObject):
         try:
             return super().target_field
         except IndexError:  # pragma: no cover
-            if TYPE_CHECKING:
-                return cast("models.Field", None)
-            raise  # type: ignore
+            return cast("models.Field", None)
 
     def contribute_to_class(
         self, cls: Type[models.Model], name: str, private_only: bool = False
