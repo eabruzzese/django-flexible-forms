@@ -10,38 +10,28 @@ from flexible_forms.models import BaseField
 
 
 def autocomplete(
-    request: HttpRequest, field_app_label: str, field_model_name: str, field_pk: str
+    request: HttpRequest, app_label: str, model_name: str, field_pk: str
 ) -> JsonResponse:
     """Perform a search and return autocomplete results.
 
     Args:
         request: The current HTTP request.
-        field_app_label: The app_label of the appropriate BaseField implementation.
-        field_model_name: The app_label of the appropriate BaseField implementation.
+        app_label: The app_label of the appropriate BaseField implementation.
+        model_name: The app_label of the appropriate BaseField implementation.
         field_pk: The primary key of the Field record.
 
     Returns:
         JsonResponse: A select2-compatible JSON response of autocomplete suggestions.
     """
     # Retrieve the Field.
-    field_model = cast(
-        Type[BaseField], apps.get_model(field_app_label, field_model_name)
-    )
+    field_model = cast(Type[BaseField], apps.get_model(app_label, model_name))
     field = get_object_or_404(field_model, pk=field_pk)
     field_type = cast(AutocompleteSelectField, field.as_field_type())
 
-    page = int(request.GET.get("page", 1))
-    per_page = int(
-        request.GET.get("per_page", field.form_widget_options.get("per_page", 100))
-    )
-
     search_results, has_more = field_type.autocomplete(
         request=request,
-        page=page,
-        **{
-            **field.form_widget_options,
-            "per_page": per_page,
-        }
+        field=field,
+        **field.form_widget_options,
     )
 
     # Perform the search and return a Select2-compatible response.

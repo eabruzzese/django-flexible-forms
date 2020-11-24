@@ -6,7 +6,7 @@ from . import views
 app_name = "flexible_forms"
 urlpatterns = [
     path(
-        "autocomplete/<str:field_app_label>/<str:field_model_name>/<int:field_pk>",
+        "<str:app_label>/<str:model_name>/<int:field_pk>/autocomplete",
         views.autocomplete,
         name="autocomplete",
     ),

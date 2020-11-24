@@ -25,6 +25,9 @@ from django.db.models import fields as model_fields
 from django.forms import fields as form_fields
 from django.forms import widgets as form_widgets
 from django.http.request import HttpRequest
+from django.shortcuts import get_object_or_404
+from django.template import Context, Template
+from django.template.base import VariableNode
 from django.urls import reverse
 
 from flexible_forms.widgets import (
@@ -40,11 +43,7 @@ except ImportError:  # pragma: no cover
     from django.contrib.postgres.fields import JSONField
     from django.contrib.postgres.forms import JSONField as JSONFormField
 
-from flexible_forms.utils import (
-    LenientFormatter,
-    evaluate_expression,
-    stable_json,
-)
+from flexible_forms.utils import evaluate_expression, stable_json
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +52,7 @@ logger = logging.getLogger(__name__)
 _EMPTY_CHOICES = (("EMPTY", "Select a value."),)
 
 if TYPE_CHECKING:  # pragma: no cover
-    from flexible_forms.models import BaseField
+    from flexible_forms.models import BaseField, BaseRecord
 
 
 ##
@@ -201,6 +200,7 @@ class FieldType(metaclass=FieldTypeMetaclass):
         cls,
         *,
         field: "BaseField",
+        record: Optional["BaseRecord"] = None,
         modifiers: Sequence[Tuple[str, str]] = (),
         field_values: Optional[Mapping[str, Optional[Any]]] = None,
         **kwargs: Any,
@@ -211,6 +211,8 @@ class FieldType(metaclass=FieldTypeMetaclass):
 
         Args:
             field: The Field model instance.
+            record: The record instance to which the form is bound, if
+                available.
             modifiers: A sequence of modifiers to be applied to the field.
             field_values: A mapping of the current form values.
             kwargs: Passed to the form field constructor.
@@ -219,7 +221,9 @@ class FieldType(metaclass=FieldTypeMetaclass):
             form_fields.Field: An instance of the form field.
         """
         # If no widget was given explicitly, build a default one.
-        kwargs["widget"] = kwargs.get("widget", cls.as_form_widget(field=field))
+        kwargs["widget"] = kwargs.get(
+            "widget", cls.as_form_widget(field=field, record=record)
+        )
 
         # Generate the form field with its appropriate class and widget.
         form_field = cls.form_field_class(
@@ -239,13 +243,17 @@ class FieldType(metaclass=FieldTypeMetaclass):
         return form_field
 
     @classmethod
-    def as_form_widget(cls, field: "BaseField", **kwargs: Any) -> form_widgets.Widget:
+    def as_form_widget(
+        cls, field: "BaseField", record: Optional["BaseRecord"] = None, **kwargs: Any
+    ) -> form_widgets.Widget:
         """Return an instance of the form widget for rendering.
 
         Passes additional kwargs to the form widget constructor.
 
         Args:
             field: The Field model instance.
+            record: The record instance to which the form is bound, if
+                available.
             kwargs: Passed through to the form widget constructor.
 
         Returns:
@@ -639,7 +647,10 @@ class AutocompleteSelectField(FieldType):
 
     @classmethod
     def as_form_widget(
-        cls, field: "BaseField", **form_widget_options: Any
+        cls,
+        field: "BaseField",
+        record: Optional["BaseRecord"] = None,
+        **form_widget_options: Any,
     ) -> form_widgets.Widget:
         """Build the autocomplete form widget.
 
@@ -648,6 +659,8 @@ class AutocompleteSelectField(FieldType):
 
         Args:
             field: The Field record.
+            record: The record instance to which the form is bound, if
+                available.
             form_widget_options: Parameters passed to the form widget
                 constructor.
 
@@ -655,18 +668,26 @@ class AutocompleteSelectField(FieldType):
             form_widgets.Widget: A configured widget for rendering the
                 autocomplete input.
         """
+        proxy_url = reverse(
+            "flexible_forms:autocomplete",
+            kwargs={
+                "app_label": field._meta.app_label,
+                "model_name": field._meta.model_name,
+                "field_pk": field.pk,
+            },
+        )
+
+        # If a specific record instance was supplied, append its ID to the URL
+        # so that autocomplete suggestions can be tailored to a particular
+        # record's field values.
+        proxy_url = f"{proxy_url}?record_pk={record.pk}" if record else proxy_url
+
         return super().as_form_widget(
             field=field,
+            record=record,
             **{
                 **form_widget_options,
-                "url": reverse(
-                    "flexible_forms:autocomplete",
-                    kwargs={
-                        "field_app_label": field._meta.app_label,
-                        "field_model_name": field._meta.model_name,
-                        "field_pk": field.pk,
-                    },
-                ),
+                "url": proxy_url,
             },
         )
 
@@ -674,8 +695,7 @@ class AutocompleteSelectField(FieldType):
     def autocomplete(
         cls,
         request: HttpRequest,
-        per_page: Optional[int] = None,
-        page: Optional[int] = None,
+        field: "BaseField",
         **form_widget_options: Any,
     ) -> Tuple[List[AutocompleteResult], bool]:
         """Perform a search against the configured URL.
@@ -685,8 +705,7 @@ class AutocompleteSelectField(FieldType):
 
         Args:
             request: The HTTP request.
-            per_page: The number of search results per page.
-            page: The 1-based page number for pagination.
+            field: The Field record instance that uses this autocomplete.
             form_widget_options: A dict of form widget options that can be
                 used to customize autocomplete behavior.
 
@@ -696,8 +715,9 @@ class AutocompleteSelectField(FieldType):
                 a boolean indicating whether or not there are more results to
                 fetch.
         """
-        per_page = per_page or 100
-        page = page or 1
+        # Extract pagination info.
+        page = int(request.GET.get("page", "1"))
+        per_page = int(request.GET.get("per_page", "100"))
 
         url = form_widget_options.get("url") or ""
         results_path = form_widget_options.get("results_path") or "@"
@@ -712,11 +732,37 @@ class AutocompleteSelectField(FieldType):
         if not url:
             return results, has_more
 
+        # Prevent a circular import.
+        from flexible_forms.models import BaseRecord
+
+        # If autocompletion was requested for a specific record, fetch it using
+        # the given primary key. Otherwise, make a blank record.
+        record_pk = request.GET.get("record_pk", None)
+        record_model = field.flexible_forms.get_model(BaseRecord)
+        record = (
+            get_object_or_404(record_model, pk=record_pk)
+            if record_pk is not None
+            else record_model(form=field.form)
+        )
+
+        # Render the URL as a Django Template, feeding it the current field
+        # values, the record instance ("meta"), and the GET parameters.
+        url_template = Template(url)
+        rendered_url = url_template.render(
+            Context({"record": record, **request.GET.dict()})
+        )
+
+        # Get a set of all variable names used in the template so that we can
+        # use them for optimizations later.
+        url_vars = frozenset(
+            v.filter_expression.var.lookups[0]
+            for v in url_template.nodelist
+            if isinstance(v, VariableNode)
+        )
+
         # Search the endpoint and raise an exception if we get any non-success
         # status in the response.
-        url_formatter = LenientFormatter()
-        formatted_url = url_formatter.format(url, **request.GET)
-        response = requests.get(formatted_url)
+        response = requests.get(rendered_url)
         response.raise_for_status()
 
         # Decode the JSON response.
@@ -736,10 +782,6 @@ class AutocompleteSelectField(FieldType):
             if result_value is None:
                 result_value = result_text
 
-            # If the result text and value are both None, skip the entry.
-            if result_text is None and result_value is None:
-                continue
-
             # The "id" is the value eventually stored in the database. In this
             # case, it is a stringified version of the result JSON so that it can
             # be deserialized when rendering the initial value for the widget.
@@ -753,7 +795,7 @@ class AutocompleteSelectField(FieldType):
             results.append({"id": result_id, "text": result_text})
 
         # If the remote endpoint isn't handling pagination, do it manually.
-        if not "{page}" in url:
+        if "page" not in url_vars:
             paginated_page = Paginator(results, per_page).page(page)
             results, has_more = (
                 cast(List[AutocompleteResult], paginated_page.object_list),

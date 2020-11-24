@@ -63,8 +63,8 @@ except ImportError:  # pragma: no cover
 if TYPE_CHECKING:  # pragma: no cover
     from flexible_forms.forms import BaseRecordForm
 
-T = TypeVar(
-    "T",
+M = TypeVar(
+    "M",
     bound="FlexibleBaseModel",
 )
 
@@ -279,6 +279,16 @@ class FlexibleRelation(ForeignObject):
 
         super().__init__(to, *args, **kwargs)
 
+    @property
+    def target_field(self) -> models.Field:
+        """Return the target field for the relation."""
+        try:
+            return super().target_field
+        except IndexError:
+            if TYPE_CHECKING:
+                return cast("models.Field", None)
+            return None  # type: ignore
+
     def contribute_to_class(
         self, cls: Type[models.Model], name: str, private_only: bool = False
     ) -> None:
@@ -404,7 +414,7 @@ class FlexibleBaseModel(models.Model):
     flexible_forms: "FlexibleForms"
 
     @classmethod
-    def _flexible_model_for(cls, base_model: Type[T]) -> Type[T]:
+    def _flexible_model_for(cls, base_model: Type[M]) -> Type[M]:
         """Return the current implementation of the given base_model.
 
         Args:
@@ -414,7 +424,7 @@ class FlexibleBaseModel(models.Model):
             Type[FleixbleModel]: The model class for the given base model in
                 the current implementation.
         """
-        return cast(Type[T], cls.flexible_forms.get_model(base_model))
+        return cls.flexible_forms.get_model(base_model)
 
 
 @receiver(class_prepared)
@@ -584,12 +594,6 @@ class BaseForm(FlexibleBaseModel):
             f.name: f.as_form_field() for f in all_fields
         }
         for field_name, form_field in form_fields.items():
-            field_widget = cast(Widget, form_field.widget)
-            # field_value = field_widget.value_from_datadict(
-            #     data=form_state,  # type: ignore
-            #     files=form_state,
-            #     name=field_name,
-            # )
             field_value = form_state.get(field_name)
             # Try to perform as much of the value coercion process as possible
             # while attempting to avoid running expensive validators.
@@ -603,10 +607,10 @@ class BaseForm(FlexibleBaseModel):
 
         # Regenerate the form fields, this time taking the field values into
         # account in order to inform any dynamic behaviors.
-        form_fields = {}
-        for field in all_fields:
-            form_field = field.as_form_field(field_values=form_state)
-            form_fields[field.name] = form_field
+        form_fields = {
+            f.name: f.as_form_field(field_values=form_state, record=instance)
+            for f in all_fields
+        }
 
         RecordModel = self._flexible_model_for(BaseRecord)
 
@@ -752,44 +756,48 @@ class BaseField(FlexibleBaseModel):
     def as_form_field(
         self,
         field_values: Optional[Mapping[str, Any]] = None,
+        record: Optional["BaseRecord"] = None,
     ) -> forms.Field:
         """Return a Django form Field instance.
 
         Args:
             field_values: The current values of all fields in the form.
+            record: The record instance that the form is bound to, if
+                available.
 
         Returns:
             forms.Field: The configured Django form Field instance.
         """
         return self.as_field_type().as_form_field(
-            **{
-                # Special parameters.
-                "field": self,
-                "modifiers": (
-                    (m.attribute, m.expression) for m in self.modifiers.all()
-                ),
-                "field_values": field_values,
-                # Django form field arguments.
-                "required": self.required,
-                "label": self.label,
-                "label_suffix": self.label_suffix,
-                "initial": self.initial,
-                "help_text": self.help_text,
-                "widget": self.as_form_widget(),
-                **self.form_field_options,
-            }
+            field=self,
+            record=record,
+            modifiers=tuple((m.attribute, m.expression) for m in self.modifiers.all()),
+            field_values=field_values,
+            # Django form field arguments.
+            required=self.required,
+            label=self.label,
+            label_suffix=self.label_suffix,
+            initial=self.initial,
+            help_text=self.help_text,
+            widget=self.as_form_widget(record=record),
+            **self.form_field_options,
         )
 
-    def as_form_widget(self) -> Widget:
+    def as_form_widget(self, record: Optional["BaseRecord"] = None) -> Widget:
         """Return a Django form Widget instance.
 
-        Uses the form_widget_options and the given field_values to customize the widget.
+        Uses the form_widget_options and the given field_values to customize
+        the widget.
+
+        Args:
+            record: The record instance that the form is bound to, if
+                available.
 
         Returns:
             Widget: The configured Django form Widget instance.
         """
         return self.as_field_type().as_form_widget(
-            field=self, **self.form_widget_options
+            field=self, record=record, **self.form_widget_options
         )
 
     def as_model_field(self) -> models.Field:
@@ -882,8 +890,8 @@ class BaseFieldModifier(FlexibleBaseModel):
         # exceptions are raised, they are returned as validation errors.
         Record = self.flexible_forms.get_model(BaseRecord)
         record_attributes = {
-            str(f.attname): f.value_from_object(Record())  # type: ignore
-            for f in Record._meta.get_fields()
+            str(f.attname): f.value_from_object(Record())
+            for f in cast(List[models.Field], Record._meta.get_fields())
             if hasattr(f, "attname") and hasattr(f, "value_from_object")
         }
 
@@ -1099,13 +1107,13 @@ class BaseRecord(FlexibleBaseModel):
     # The _initialized flag is used to determine if the model instance has been
     # fully initialized by Django. We use the flag to determine if it's safe to
     # start proxying __getattr__ and __setattr__ calls to our attributes
-    # association (which breaks if the instanec is not fully initialized).
+    # association (which breaks if the instance is not fully initialized).
     _initialized: bool = False
 
     # The __setattr__ proxy stores attribute updates in the _staged_changes
     # dict until save() is called. This attempts to mirror the way vanilla
     # Django models work.
-    _staged_changes: MutableMapping[str, Any]
+    _staged_changes: Dict[str, Any]
 
     class Meta:
         abstract = True
@@ -1127,10 +1135,8 @@ class BaseRecord(FlexibleBaseModel):
 
         return f"New {record_type}" if not self.pk else f"{record_type} {self.pk}"
 
-    def __init__(
-        self, *args: Any, form: Optional[BaseForm] = None, **kwargs: Any
-    ) -> None:
-        super().__init__(*args, form=form, **kwargs)
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
         self._staged_changes = {}
         self._initialized = True
 
@@ -1507,18 +1513,14 @@ class FlexibleForms:
         Args:
             model_class: The concrete implementation of a flexible base model.
         """
-        base_model = self._get_flexible_base_model(model_class)
-        base_opts = base_model._meta
-
-        self.models[base_model] = model_class
-        self.models[f"{base_opts.app_label}.{base_opts.model_name}"] = model_class
+        self.models[self._get_flexible_base_model(model_class)] = model_class
 
     def get_model(
         self,
-        base_model: Union[str, Type["FlexibleBaseModel"]],
+        base_model: Type[M],
         *,
         create: bool = False,
-    ) -> Type["FlexibleBaseModel"]:
+    ) -> Type[M]:
         """Returns the concrete model for the given flexible base model.
 
         Args:
@@ -1538,7 +1540,6 @@ class FlexibleForms:
         # If no model is registered for the requested base_model yet, and
         # create is True, create and register a new model.
         if base_model not in self.models and create:
-            base_model = cast(Type["FlexibleBaseModel"], base_model)
             self.register_model(
                 type(
                     base_model.__name__.replace("Base", self.model_prefix),
@@ -1548,7 +1549,7 @@ class FlexibleForms:
             )
 
         try:
-            return self.models[base_model]
+            return cast(Type[M], self.models[base_model])
         except KeyError:
             raise LookupError(
                 f"No concrete model has been registered for {base_model}: {self.models}"
@@ -1658,7 +1659,7 @@ class FlexibleForms:
         """
         return self._generate_model(BaseRecordAttribute)
 
-    def _generate_model(self, base_model: Type[T]) -> Type[T]:
+    def _generate_model(self, base_model: Type[M]) -> Type[M]:
         """Generate a model class from the given base_model.
 
         Args:
