@@ -284,10 +284,10 @@ class FlexibleRelation(ForeignObject):
         """Return the target field for the relation."""
         try:
             return super().target_field
-        except IndexError:
+        except IndexError:  # pragma: no cover
             if TYPE_CHECKING:
                 return cast("models.Field", None)
-            return None  # type: ignore
+            raise  # type: ignore
 
     def contribute_to_class(
         self, cls: Type[models.Model], name: str, private_only: bool = False
