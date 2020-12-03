@@ -9,6 +9,14 @@ from django.core.files.base import File
 from django.forms.widgets import HiddenInput
 
 from flexible_forms.models import BaseForm, BaseRecord
+from flexible_forms.signals import (
+    post_form_clean,
+    post_form_init,
+    post_form_save,
+    pre_form_clean,
+    pre_form_init,
+    pre_form_save,
+)
 
 
 class BaseRecordForm(forms.ModelForm):
@@ -60,6 +68,16 @@ class BaseRecordForm(forms.ModelForm):
                 except (AttributeError, KeyError):
                     continue
 
+        # Emit a signal before initializing the form.
+        pre_form_init.send(
+            sender=self.__class__,
+            form=self,
+            data=data,
+            files=files,
+            instance=instance,
+            initial=initial,
+        )
+
         super().__init__(
             data=data, files=files, instance=instance, initial=initial, **kwargs
         )
@@ -68,8 +86,27 @@ class BaseRecordForm(forms.ModelForm):
             self.fields["form"].disabled = True
             self.fields["form"].widget = HiddenInput()
 
+        # Emit a signal after initializing the form.
+        post_form_init.send(
+            sender=self.__class__,
+            django_form=self,
+        )
+
+    def full_clean(self) -> None:
+        """Perform a full clean of the form.
+
+        Emits signals before and after.
+        """
+        pre_form_clean.send(sender=self.__class__, form=self)
+        clean_result = super().full_clean()
+        post_form_clean.send(sender=self.__class__, form=self)
+
+        return clean_result
+
     def clean(self) -> Dict[str, Any]:
         """Clean the form data before saving."""
+        # Emit a signal before initializing the form.
+
         cleaned_data = super().clean()
 
         for key, value in cleaned_data.items():
@@ -103,6 +140,8 @@ class BaseRecordForm(forms.ModelForm):
         Returns:
             instance: The Record model instance.
         """
+        pre_form_save.send(sender=self.__class__, form=self)
+
         # Update any changed attributes.
         for field_name in self.changed_data:
             setattr(self.instance, field_name, self.cleaned_data[field_name])
@@ -111,5 +150,7 @@ class BaseRecordForm(forms.ModelForm):
             self.instance.save()
         else:
             super().save(commit=commit)
+
+        post_form_save.send(sender=self.__class__, form=self)
 
         return cast("BaseRecord", self.instance)
