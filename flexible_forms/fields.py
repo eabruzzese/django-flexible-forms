@@ -8,7 +8,6 @@ from typing import (
     Any,
     Dict,
     List,
-    Mapping,
     Optional,
     Sequence,
     Tuple,
@@ -200,10 +199,10 @@ class FieldType(metaclass=FieldTypeMetaclass):
         cls,
         *,
         field: "BaseField",
+        field_values: Dict[str, Optional[Any]],
         record: Optional["BaseRecord"] = None,
         modifiers: Sequence[Tuple[str, str]] = (),
-        field_values: Optional[Mapping[str, Optional[Any]]] = None,
-        **kwargs: Any,
+        **form_field_options: Any,
     ) -> form_fields.Field:
         """Return an instance of the field for use in a Django form.
 
@@ -215,13 +214,13 @@ class FieldType(metaclass=FieldTypeMetaclass):
                 available.
             modifiers: A sequence of modifiers to be applied to the field.
             field_values: A mapping of the current form values.
-            kwargs: Passed to the form field constructor.
+            form_field_options: Passed to the form field constructor.
 
         Returns:
             form_fields.Field: An instance of the form field.
         """
         # If no widget was given explicitly, build a default one.
-        kwargs["widget"] = kwargs.get(
+        form_field_options["widget"] = form_field_options.get(
             "widget", cls.as_form_widget(field=field, record=record)
         )
 
@@ -229,13 +228,15 @@ class FieldType(metaclass=FieldTypeMetaclass):
         form_field = cls.form_field_class(
             **{
                 **cls.form_field_options,
-                **kwargs,
+                **form_field_options,
             },
         )
 
         # Apply any modifiers to the field.
         form_field = cls.apply_modifiers(
-            form_field=form_field,
+            form_field,
+            field=field,
+            record=record,
             modifiers=modifiers,
             field_values=field_values,
         )
@@ -244,7 +245,11 @@ class FieldType(metaclass=FieldTypeMetaclass):
 
     @classmethod
     def as_form_widget(
-        cls, field: "BaseField", record: Optional["BaseRecord"] = None, **kwargs: Any
+        cls,
+        *,
+        field: "BaseField",
+        record: Optional["BaseRecord"] = None,
+        **form_widget_options: Any,
     ) -> form_widgets.Widget:
         """Return an instance of the form widget for rendering.
 
@@ -254,7 +259,7 @@ class FieldType(metaclass=FieldTypeMetaclass):
             field: The Field model instance.
             record: The record instance to which the form is bound, if
                 available.
-            kwargs: Passed through to the form widget constructor.
+            form_widget_options: Passed through to the form widget constructor.
 
         Returns:
             form_widgets.Widget: The configured form widget for the field.
@@ -264,19 +269,19 @@ class FieldType(metaclass=FieldTypeMetaclass):
         return widget_cls(
             **{
                 **cls.form_widget_options,
-                **kwargs,
+                **form_widget_options,
             }
         )
 
     @classmethod
-    def as_model_field(cls, **kwargs: Any) -> model_fields.Field:
+    def as_model_field(cls, **model_field_options: Any) -> model_fields.Field:
         """Return an instance of the field for use in a Django model.
 
         Receives a dict of kwargs to pass through to the model field constructor.
 
         Args:
-            kwargs: A dict of kwargs to be passed to the constructor of the
-                `model_field_class`.
+            model_field_options: A dict of kwargs to be passed to the
+                constructor of the `model_field_class`.
 
         Returns:
             model_fields.Field: An instance of the model field.
@@ -284,7 +289,7 @@ class FieldType(metaclass=FieldTypeMetaclass):
         return cls.model_field_class(
             **{
                 **cls.model_field_options,
-                **kwargs,
+                **model_field_options,
             }
         )
 
@@ -292,27 +297,41 @@ class FieldType(metaclass=FieldTypeMetaclass):
     def apply_modifiers(
         cls,
         form_field: form_fields.Field,
+        *,
+        field: "BaseField",
+        field_values: Dict[str, Any],
+        record: Optional["BaseRecord"] = None,
         modifiers: Sequence[Tuple[str, str]] = (),
-        field_values: Optional[Mapping[str, Any]] = None,
     ) -> form_fields.Field:
         """Apply the given modifiers to the given Django form field.
 
         Args:
             form_field: The form field to be modified.
+            field: The BaseField instance.
+            field_values: The current values of all fields on the form.
+            record: The BaseRecord instance, if available.
             modifiers: A sequence of tuples
                 in the form of (attribute, expression) tuples to apply to the
                 field.
-            field_values: The current values of
-                all fields on the form.
 
         Returns:
             form_fields.Field: The given form field, modified using the modifiers.
         """
         for attribute, expression in modifiers:
+            expression_context = field_values
+
+            if record:
+                record_variable = (
+                    (record._meta.verbose_name or "record").lower().replace(" ", "_")
+                )
+                expression_context = {record_variable: record, **field_values}
+
             # Evaluate the expression and set the attribute specified by
             # `self.attribute` to the value it returns.
             try:
-                expression_value = evaluate_expression(expression, names=field_values)
+                expression_value = evaluate_expression(
+                    expression, names=expression_context
+                )
             except simpleeval.NameNotDefined:
                 continue
 
@@ -321,11 +340,11 @@ class FieldType(metaclass=FieldTypeMetaclass):
             custom_applicator = getattr(cls, f"apply_{attribute}", None)
             if custom_applicator:
                 form_field = custom_applicator(
-                    **{
-                        "form_field": form_field,
-                        attribute: expression_value,
-                        "field_values": field_values,
-                    }
+                    form_field,
+                    field=field,
+                    record=record,
+                    field_values=field_values,
+                    **{attribute: expression_value},
                 )
 
             # If no custom applicator method is implemented, but the form field
@@ -349,7 +368,11 @@ class FieldType(metaclass=FieldTypeMetaclass):
 
     @classmethod
     def apply_hidden(
-        cls, form_field: form_fields.Field, hidden: bool = False, **kwargs: Any
+        cls,
+        form_field: form_fields.Field,
+        *,
+        hidden: bool = False,
+        **kwargs: Any,
     ) -> form_fields.Field:
         """Apply the "hidden" attribute.
 
@@ -748,8 +771,12 @@ class AutocompleteSelectField(FieldType):
         # Render the URL as a Django Template, feeding it the current field
         # values, the record instance ("meta"), and the GET parameters.
         url_template = Template(url)
+        record_variable = (
+            (record._meta.verbose_name or "record").lower().replace(" ", "_")
+        )
+        url_template_context = Context({record_variable: record, **request.GET.dict()})
         rendered_url = request.build_absolute_uri(
-            url_template.render(Context({"record": record, **request.GET.dict()}))
+            url_template.render(url_template_context)
         )
 
         # Get a set of all variable names used in the template so that we can

@@ -98,7 +98,7 @@ def test_autocomplete_with_record(rf: RequestFactory, requests_mock) -> None:
     per_page) and the record, if available.
     """
     dynamic_url = PAGINATED_URL + (
-        "&record_pk={{record.pk}}&field_value={{record.test_field}}"
+        "&record_pk={{quiz_submission.pk}}&field_value={{quiz_submission.test_field}}"
     )
 
     mock_request = requests_mock.get(BASE_URL, text=json.dumps(MOCK_RESPONSE))

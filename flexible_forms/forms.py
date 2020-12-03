@@ -51,6 +51,15 @@ class BaseRecordForm(forms.ModelForm):
         instance = instance or opts.model(form=self.form)
         initial = {**instance._data, **(initial or {}), "form": self.form}
 
+        # If any of the form fields have a "value" specified in their
+        # "_modifiers", use it if the form is bound.
+        if data is not None:
+            for field_name, field in self.base_fields.items():
+                try:
+                    data[field_name] = field._modifiers["value"]  # type: ignore
+                except (AttributeError, KeyError):
+                    continue
+
         super().__init__(
             data=data, files=files, instance=instance, initial=initial, **kwargs
         )

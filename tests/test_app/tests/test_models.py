@@ -98,7 +98,7 @@ def test_field() -> None:
     assert str(field) == "Updated Test Field"
 
     # Ensure that a Django form field instance can be produced from the field.
-    assert isinstance(field.as_form_field(), forms.Field)
+    assert isinstance(field.as_form_field(field_values={}), forms.Field)
 
     # Ensure that a Django model field instance can be produced from the field.
     assert isinstance(field.as_model_field(), models.Field)

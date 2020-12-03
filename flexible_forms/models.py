@@ -12,7 +12,6 @@ from typing import (
     Dict,
     List,
     Mapping,
-    MutableMapping,
     Optional,
     Sequence,
     Set,
@@ -41,7 +40,6 @@ from django.db.models.query import Prefetch
 from django.db.models.signals import class_prepared, pre_init
 from django.dispatch.dispatcher import receiver
 from django.forms.widgets import Widget
-from django.utils.datastructures import MultiValueDict
 from django.utils.functional import cached_property
 from django.utils.text import slugify
 from simpleeval import FunctionNotDefined, NameNotDefined
@@ -482,17 +480,12 @@ class BaseForm(FlexibleBaseModel):
         super().save(*args, **kwargs)
 
     @property
-    def initial_values(self) -> "MultiValueDict[str, Any]":
+    def initial_values(self) -> Dict[str, Any]:
         """Return a mapping of initial values for the form."""
-        return MultiValueDict(
-            {
-                **{
-                    f.name: f.initial if isinstance(f.initial, list) else [f.initial]
-                    for f in self.fields.all()
-                },
-                "form": [self],
-            }
-        )
+        return {
+            **{f.name: f.initial for f in self.fields.all()},
+            "form": self,
+        }
 
     def as_django_fieldsets(
         self,
@@ -577,36 +570,20 @@ class BaseForm(FlexibleBaseModel):
         """
         all_fields = self.fields.all()
 
-        # Build a MultiValueDict containing all field values. This combines all
-        # of the form data into a single structure that will be used when
-        # evaluating expressions against the form state.
-        form_state: MultiValueDict[str, Any] = self.initial_values
-        form_state.update(initial or {})
-        form_state.update(instance._data if instance else {})
-        form_state.update(data or {})
-        form_state.update(files or {})
-
-        # Normalize the field values to ensure they are all cast to their
-        # appropriate types (as defined by their corresponding form fields).
-        form_fields: MutableMapping[str, forms.Field] = {
-            f.name: f.as_form_field() for f in all_fields
+        # Build a dict containing all field values. This combines all of the
+        # form data into a single structure that will be used when evaluating
+        # expressions against the form state.
+        field_values: Dict[str, Any] = {
+            **self.initial_values,
+            **(instance._data if instance else {}),
+            **(data or {}),
+            **(files or {}),
         }
-        for field_name, form_field in form_fields.items():
-            field_value = form_state.get(field_name)
-            # Try to perform as much of the value coercion process as possible
-            # while attempting to avoid running expensive validators.
-            try:
-                field_value = form_field.to_python(field_value)
-                if callable(getattr(form_field, "_coerce", None)):
-                    field_value = form_field._coerce(field_value)  # type: ignore
-            except ValidationError:
-                pass
-            form_state[field_name] = field_value
 
         # Regenerate the form fields, this time taking the field values into
         # account in order to inform any dynamic behaviors.
         form_fields = {
-            f.name: f.as_form_field(field_values=form_state, record=instance)
+            f.name: f.as_form_field(field_values=field_values, record=instance)
             for f in all_fields
         }
 
@@ -753,7 +730,7 @@ class BaseField(FlexibleBaseModel):
 
     def as_form_field(
         self,
-        field_values: Optional[Mapping[str, Any]] = None,
+        field_values: Dict[str, Any],
         record: Optional["BaseRecord"] = None,
     ) -> forms.Field:
         """Return a Django form Field instance.
@@ -768,9 +745,9 @@ class BaseField(FlexibleBaseModel):
         """
         return self.as_field_type().as_form_field(
             field=self,
+            field_values=field_values,
             record=record,
             modifiers=tuple((m.attribute, m.expression) for m in self.modifiers.all()),
-            field_values=field_values,
             # Django form field arguments.
             required=self.required,
             label=self.label,
@@ -877,7 +854,7 @@ class BaseFieldModifier(FlexibleBaseModel):
         # associated with a field and its form (we need to get the initial
         # values from the form to test the expression).
         try:
-            field_values = self.field.form.initial_values.dict()
+            field_values = self.field.form.initial_values
         except ObjectDoesNotExist:
             return
 
@@ -887,6 +864,9 @@ class BaseFieldModifier(FlexibleBaseModel):
         # the Record) and running it through the expression evaluator. If any
         # exceptions are raised, they are returned as validation errors.
         Record = self.flexible_forms.get_model(BaseRecord)
+        record_variable = (
+            (Record._meta.verbose_name or "record").lower().replace(" ", "_")
+        )
         record_attributes = {
             str(f.attname): f.value_from_object(Record())
             for f in cast(List[models.Field], Record._meta.get_fields())
@@ -894,7 +874,7 @@ class BaseFieldModifier(FlexibleBaseModel):
         }
 
         expression_context: Mapping[str, Any] = {
-            "meta": record_attributes,
+            record_variable: record_attributes,
             **field_values,
         }
 
