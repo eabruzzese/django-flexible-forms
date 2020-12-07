@@ -785,35 +785,48 @@ class AutocompleteSelectField(FieldType):
         url_template_context = Context({record_variable: record, **request.GET.dict()})
         rendered_url = url_template.render(url_template_context)
 
-        # Try to resolve the URL to a view function to see if the request can
-        # simply be proxied to the view instead of making another HTTP request.
-        # This removes a lot of complication around things like auth, since
-        # we're proxying the current request with all its cookies, etc.
-        try:
-            view_func, args, kwargs = resolve(urlparse.urlparse(rendered_url).path)
+        parsed_url = urlparse.urlparse(rendered_url)
+        response_json = None
 
-            # Remove the original GET parameters from the request to prevent
-            # passing them to the configured URL.
-            request.META["QUERY_STRING"] = ""
-            request.GET = QueryDict(mutable=True)
+        # If the configured URL is just a path, we might be able to simply
+        # proxy the request to an internal view function instead of making an
+        # entirely new HTTP request. This is less expensive and side-steps
+        # issues with auth when calling local views.
+        if not parsed_url.netloc:
+            try:
+                resolver_match = resolve(parsed_url.path)
+            except Resolver404:  # pragma: no cover
+                pass
+            else:
+                view_func, args, kwargs = resolver_match
 
-            # Invalidate cached properties affected by the request update.
-            for attr, value in type(request).__dict__.items():
-                if not isinstance(value, cached_property):
-                    continue
-                try:
-                    delattr(request, attr)
-                except AttributeError:
-                    pass
+                # Update the request to point to the configured URL.
+                request.META["QUERY_STRING"] = parsed_url.query
+                request.GET = QueryDict(parsed_url.query)
+                request.path = parsed_url.path
+                request.path_info = parsed_url.path
+                request.resolver_match = resolver_match
 
-            # Call the view function with the updated request object.
-            response = view_func(request, *args, **kwargs)
-            response = response.render() if hasattr(response, "render") else response
-            response_json = json.loads(response.content)
+                # Invalidate cached properties affected by the request update.
+                for attr, value in type(request).__dict__.items():
+                    if not isinstance(value, cached_property):
+                        continue
+                    try:
+                        delattr(request, attr)
+                    except AttributeError:
+                        pass
 
-        # If we couldn't reolve the URL to a view function, turn it into an
-        # absolute URL and make a request to it as if it were external.
-        except Resolver404:
+                # Call the view function with the updated request object.
+                response = view_func(request, *args, **kwargs)
+                response_json = json.loads(
+                    response.rendered_content
+                    if hasattr(response, "rendered_content")
+                    else response.content
+                )
+
+        # If we weren't able to call a local view tog et our results, we'll
+        # make a regular GET request to the URL instead.
+        if response_json is None:
             rendered_url = request.build_absolute_uri(rendered_url)
             response = requests.get(rendered_url)
             response.raise_for_status()
@@ -825,7 +838,7 @@ class AutocompleteSelectField(FieldType):
         text_expr = jmespath.compile(text_path)
         id_expr = jmespath.compile(id_path)
 
-        raw_results = results_expr.search(response_json)
+        raw_results = results_expr.search(response_json) or []
         for result in raw_results:
             result_text = text_expr.search(result)
             result_value = id_expr.search(result)
