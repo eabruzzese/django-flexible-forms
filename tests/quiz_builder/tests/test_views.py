@@ -2,10 +2,11 @@
 import json
 
 import pytest
+from django.http import JsonResponse
 from django.test import RequestFactory
 from django.urls import reverse
 
-from flexible_forms import views
+from flexible_forms import fields, views
 from flexible_forms.fields import AutocompleteSelectField, SingleLineTextField
 from tests.quiz_builder.tests.factories import QuizFactory, QuizQuestionFactory
 
@@ -163,6 +164,31 @@ def test_autocomplete_no_url(rf: RequestFactory) -> None:
     results = _get_autocomplete_results(rf, question_field)
 
     assert results == EXPECTED_RESULTS_EMPTY
+
+
+@pytest.mark.django_db
+def test_autocomplete_internal_url(rf: RequestFactory, mocker) -> None:
+    """Ensure that autocomplete fields route app-internal paths directly to
+    view functions."""
+    mocker.patch.object(
+        fields,
+        "resolve",
+        return_value=(lambda *a, **kw: JsonResponse(MOCK_RESPONSE), (), {}),
+    )
+
+    question_field = QuizQuestionFactory(
+        field_type=AutocompleteSelectField.name,
+        form_widget_options={
+            "url": "/dummy/endpoint?page={{page}}&per_page={{per_page}}",
+            "results_path": "data",
+            "id_path": "_id",
+            "text_path": "name",
+        },
+    )
+
+    results = _get_autocomplete_results(rf, question_field, page=1, per_page=5)
+
+    assert results == EXPECTED_RESULTS
 
 
 @pytest.mark.django_db

@@ -2,6 +2,7 @@
 
 """Field definitions for the flexible_forms module."""
 
+import json
 import logging
 from typing import (
     TYPE_CHECKING,
@@ -27,7 +28,7 @@ from django.http.request import HttpRequest
 from django.shortcuts import get_object_or_404
 from django.template import Context, Template
 from django.template.base import VariableNode
-from django.urls import reverse
+from django.urls import Resolver404, resolve, reverse
 
 from flexible_forms.widgets import (
     AutocompleteResult,
@@ -771,29 +772,33 @@ class AutocompleteSelectField(FieldType):
         # Render the URL as a Django Template, feeding it the current field
         # values, the record instance ("meta"), and the GET parameters.
         url_template = Template(url)
-        record_variable = (
-            (record._meta.verbose_name or "record").lower().replace(" ", "_")
-        )
-        url_template_context = Context({record_variable: record, **request.GET.dict()})
-        rendered_url = request.build_absolute_uri(
-            url_template.render(url_template_context)
-        )
-
-        # Get a set of all variable names used in the template so that we can
-        # use them for optimizations later.
         url_vars = frozenset(
             v.filter_expression.var.lookups[0]
             for v in url_template.nodelist
             if isinstance(v, VariableNode)
         )
+        record_variable = (
+            (record._meta.verbose_name or "record").lower().replace(" ", "_")
+        )
+        url_template_context = Context({record_variable: record, **request.GET.dict()})
+        rendered_url = url_template.render(url_template_context)
 
-        # Search the endpoint and raise an exception if we get any non-success
-        # status in the response.
-        response = requests.get(rendered_url)
-        response.raise_for_status()
+        # Try to resolve the URL to a view function to see if the request can
+        # simply be proxied to the view instead of making another HTTP request.
+        # This removes a lot of complication around things like auth, since
+        # we're proxying the current request with all its cookies, etc.
+        try:
+            view_func, args, kwargs = resolve(rendered_url)
+            response = view_func(request, *args, **kwargs)
+            response_json = json.loads(response.content)
 
-        # Decode the JSON response.
-        response_json = response.json()
+        # If we couldn't reolve the URL to a view function, turn it into an
+        # absolute URL and make a request to it as if it were external.
+        except Resolver404:
+            rendered_url = request.build_absolute_uri(rendered_url)
+            response = requests.get(rendered_url)
+            response.raise_for_status()
+            response_json = response.json()
 
         # Parse the search response and map each result to a Select2-compatible
         # dict with an "id" and a "text" property.
