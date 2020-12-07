@@ -4,6 +4,7 @@
 
 import json
 import logging
+import urllib.parse as urlparse
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -24,11 +25,12 @@ from django.db.models import FileField, ImageField
 from django.db.models import fields as model_fields
 from django.forms import fields as form_fields
 from django.forms import widgets as form_widgets
-from django.http.request import HttpRequest
+from django.http import HttpRequest, QueryDict
 from django.shortcuts import get_object_or_404
 from django.template import Context, Template
 from django.template.base import VariableNode
 from django.urls import Resolver404, resolve, reverse
+from django.utils.functional import cached_property
 
 from flexible_forms.widgets import (
     AutocompleteResult,
@@ -788,7 +790,23 @@ class AutocompleteSelectField(FieldType):
         # This removes a lot of complication around things like auth, since
         # we're proxying the current request with all its cookies, etc.
         try:
-            view_func, args, kwargs = resolve(rendered_url)
+            view_func, args, kwargs = resolve(urlparse.urlparse(rendered_url).path)
+
+            # Remove the original GET parameters from the request to prevent
+            # passing them to the configured URL.
+            request.META["QUERY_STRING"] = ""
+            request.GET = QueryDict(mutable=True)
+
+            # Invalidate cached properties affected by the request update.
+            for attr, value in type(request).__dict__.items():
+                if not isinstance(value, cached_property):
+                    continue
+                try:
+                    delattr(request, attr)
+                except AttributeError:
+                    pass
+
+            # Call the view function with the updated request object.
             response = view_func(request, *args, **kwargs)
             response = response.render() if hasattr(response, "render") else response
             response_json = json.loads(response.content)
