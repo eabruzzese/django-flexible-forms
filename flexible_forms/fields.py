@@ -790,6 +790,7 @@ class AutocompleteSelectField(FieldType):
         try:
             view_func, args, kwargs = resolve(rendered_url)
             response = view_func(request, *args, **kwargs)
+            response = response.render() if hasattr(response, "render") else response
             response_json = json.loads(response.content)
 
         # If we couldn't reolve the URL to a view function, turn it into an
