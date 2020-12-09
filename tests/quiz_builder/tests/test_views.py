@@ -19,18 +19,30 @@ MOCK_RESPONSE = {
         {
             "_id": "5f1c59c3fa523c3aa793bcfa",
             "name": " MIRKO TOMIC Mladji",
+            "airline": {
+                "name": "Delta",
+            },
         },
         {
             "_id": "5f1c59c3fa523c3aa793bd26",
             "name": "Phyllis Jessen",
+            "airline": {
+                "name": "Delta",
+            },
         },
         {
             "_id": "5f1c59c3fa523c3aa793bd30",
             "name": "Darcie Coleville",
+            "airline": {
+                "name": "Delta",
+            },
         },
         {
             "_id": "5f1c59c3fa523c3aa793bd2d",
             "name": "Tandy Aphra",
+            "airline": {
+                "name": "Delta",
+            },
         },
         # Results without an ID will use the name as the ID by default.
         {
@@ -42,24 +54,34 @@ EXPECTED_RESULTS_EMPTY = {"results": [], "pagination": {"more": False}}
 EXPECTED_RESULTS = {
     "results": [
         {
-            "id": '{"extra":{},"id":"5f1c59c3fa523c3aa793bcfa","text":" MIRKO TOMIC Mladji"}',
+            "extra": {"Airline": "Delta"},
+            "id": '{"extra":{"Airline":"Delta"},"text":" MIRKO TOMIC Mladji","value":"5f1c59c3fa523c3aa793bcfa"}',
             "text": " MIRKO TOMIC Mladji",
+            "value": "5f1c59c3fa523c3aa793bcfa",
         },
         {
-            "id": '{"extra":{},"id":"5f1c59c3fa523c3aa793bd26","text":"Phyllis Jessen"}',
+            "extra": {"Airline": "Delta"},
+            "id": '{"extra":{"Airline":"Delta"},"text":"Phyllis Jessen","value":"5f1c59c3fa523c3aa793bd26"}',
             "text": "Phyllis Jessen",
+            "value": "5f1c59c3fa523c3aa793bd26",
         },
         {
-            "id": '{"extra":{},"id":"5f1c59c3fa523c3aa793bd30","text":"Darcie Coleville"}',
+            "extra": {"Airline": "Delta"},
+            "id": '{"extra":{"Airline":"Delta"},"text":"Darcie Coleville","value":"5f1c59c3fa523c3aa793bd30"}',
             "text": "Darcie Coleville",
+            "value": "5f1c59c3fa523c3aa793bd30",
         },
         {
-            "id": '{"extra":{},"id":"5f1c59c3fa523c3aa793bd2d","text":"Tandy Aphra"}',
+            "extra": {"Airline": "Delta"},
+            "id": '{"extra":{"Airline":"Delta"},"text":"Tandy Aphra","value":"5f1c59c3fa523c3aa793bd2d"}',
             "text": "Tandy Aphra",
+            "value": "5f1c59c3fa523c3aa793bd2d",
         },
         {
-            "id": '{"extra":{},"id":"Same as ID","text":"Same as ID"}',
+            "extra": {"Airline": None},
+            "id": '{"extra":{"Airline":null},"text":"Same as ID","value":"Same as ID"}',
             "text": "Same as ID",
+            "value": "Same as ID",
         },
     ],
     "pagination": {"more": True},
@@ -80,9 +102,12 @@ def test_autocomplete_no_record(rf: RequestFactory, requests_mock) -> None:
         field_type=AutocompleteSelectField.name,
         form_widget_options={
             "url": PAGINATED_URL,
-            "results_path": "data",
-            "id_path": "_id",
-            "text_path": "name",
+            "mapping": {
+                "root": "data",
+                "value": "_id",
+                "text": "name",
+                "extra": {"Airline": "airline.name"},
+            },
         },
     )
 
@@ -116,9 +141,12 @@ def test_autocomplete_with_record(rf: RequestFactory, requests_mock) -> None:
         field_type=AutocompleteSelectField.name,
         form_widget_options={
             "url": dynamic_url,
-            "results_path": "data",
-            "id_path": "_id",
-            "text_path": "name",
+            "mapping": {
+                "root": "data",
+                "value": "_id",
+                "text": "name",
+                "extra": {"Airline": "airline.name"},
+            },
         },
     )
 
@@ -155,9 +183,12 @@ def test_autocomplete_no_url(rf: RequestFactory) -> None:
         field_type=AutocompleteSelectField.name,
         form_widget_options={
             "url": "",
-            "results_path": "data",
-            "id_path": "_id",
-            "text_path": "name",
+            "mapping": {
+                "root": "data",
+                "value": "_id",
+                "text": "name",
+                "extra": {"Airline": "airline.name"},
+            },
         },
     )
 
@@ -180,9 +211,12 @@ def test_autocomplete_internal_url(rf: RequestFactory, mocker) -> None:
         field_type=AutocompleteSelectField.name,
         form_widget_options={
             "url": "/dummy/endpoint?page={{page}}&per_page={{per_page}}",
-            "results_path": "data",
-            "id_path": "_id",
-            "text_path": "name",
+            "mapping": {
+                "root": "data",
+                "value": "_id",
+                "text": "name",
+                "extra": {"Airline": "airline.name"},
+            },
         },
     )
 
@@ -205,8 +239,10 @@ def test_autocomplete_manual_pagination(rf: RequestFactory, requests_mock) -> No
     expected_results = {
         "results": [
             {
-                "id": '{"extra":{},"id":"5f1c59c3fa523c3aa793bcfa","text":" MIRKO TOMIC Mladji"}',
+                "extra": {"Airline": "Delta"},
+                "id": '{"extra":{"Airline":"Delta"},"text":" MIRKO TOMIC Mladji","value":"5f1c59c3fa523c3aa793bcfa"}',
                 "text": " MIRKO TOMIC Mladji",
+                "value": "5f1c59c3fa523c3aa793bcfa",
             },
         ],
         "pagination": {"more": True},
@@ -216,9 +252,12 @@ def test_autocomplete_manual_pagination(rf: RequestFactory, requests_mock) -> No
         field_type=AutocompleteSelectField.name,
         form_widget_options={
             "url": BASE_URL,
-            "results_path": "data",
-            "id_path": "_id",
-            "text_path": "name",
+            "mapping": {
+                "root": "data",
+                "value": "_id",
+                "text": "name",
+                "extra": {"Airline": "airline.name"},
+            },
         },
     )
 

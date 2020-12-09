@@ -14,10 +14,10 @@ from typing import (
     Sequence,
     Tuple,
     Type,
+    TypedDict,
     cast,
 )
 
-import jmespath
 import requests
 import simpleeval
 from django.core.paginator import Paginator
@@ -45,7 +45,7 @@ except ImportError:  # pragma: no cover
     from django.contrib.postgres.fields import JSONField
     from django.contrib.postgres.forms import JSONField as JSONFormField
 
-from flexible_forms.utils import evaluate_expression, stable_json
+from flexible_forms.utils import evaluate_expression, jp, stable_json
 
 logger = logging.getLogger(__name__)
 
@@ -662,6 +662,13 @@ class ImageUploadField(FieldType):
     model_field_class = ImageField
 
 
+AutocompleteResultMapping = TypedDict(
+    "AutocompleteResultMapping",
+    {"root": str, "value": str, "text": str, "extra": Dict[str, str]},
+    total=False,
+)
+
+
 class AutocompleteSelectField(FieldType):
     """A field for autocompleting selections from an HTTP endpoint."""
 
@@ -718,46 +725,28 @@ class AutocompleteSelectField(FieldType):
         )
 
     @classmethod
-    def autocomplete(
+    def render_url(
         cls,
         request: HttpRequest,
         field: "BaseField",
+        url: str,
         **form_widget_options: Any,
-    ) -> Tuple[List[AutocompleteResult], bool]:
-        """Perform a search against the configured URL.
+    ) -> Tuple[str, bool]:
+        """Render the URL using DTL.
 
-        Returns a sequence of dicts, each with "id" and "text" values to use
-        within a select form element.
+        Uses the record (if available) and the request's GET parameters as
+        context when rendering.
 
         Args:
-            request: The HTTP request.
-            field: The Field record instance that uses this autocomplete.
-            form_widget_options: A dict of form widget options that can be
-                used to customize autocomplete behavior.
+            request: The current HttpRequest.
+            field: The BaseField instance.
+            url: The url configured in the form_widget_options.
+            form_widget_options: Options passed to the form widget.
 
         Returns:
-            Tuple[Sequence[AutocompleteResult], bool]: A two-tuple containing
-                a sequence of zero or more select2-compatible search results, and
-                a boolean indicating whether or not there are more results to
-                fetch.
+            Tuple[str, bool]: The rendered URL and a flag indicating whether
+                pagination was handled by the remote endpoint or not.
         """
-        # Extract pagination info.
-        page = int(request.GET.get("page", "1"))
-        per_page = int(request.GET.get("per_page", "100"))
-
-        url = form_widget_options.get("url") or ""
-        results_path = form_widget_options.get("results_path") or "@"
-        text_path = form_widget_options.get("text_path") or "(text || label || name)"
-        id_path = form_widget_options.get("id_path") or "id"
-
-        # Initialize results with an empty list.
-        results: List[AutocompleteResult] = []
-        has_more = False
-
-        # If no URL has been configured, return results as-is.
-        if not url:
-            return results, has_more
-
         # Prevent a circular import.
         from flexible_forms.models import BaseRecord
 
@@ -774,18 +763,44 @@ class AutocompleteSelectField(FieldType):
         # Render the URL as a Django Template, feeding it the current field
         # values, the record instance ("meta"), and the GET parameters.
         url_template = Template(url)
-        url_vars = frozenset(
-            v.filter_expression.var.lookups[0]
-            for v in url_template.nodelist
-            if isinstance(v, VariableNode)
-        )
         record_variable = (
             (record._meta.verbose_name or "record").lower().replace(" ", "_")
         )
         url_template_context = Context({record_variable: record, **request.GET.dict()})
-        rendered_url = url_template.render(url_template_context)
 
-        parsed_url = urlparse.urlparse(rendered_url)
+        # Extract a list of variables referenced in the template.
+        url_template_vars = frozenset(
+            v.filter_expression.var.lookups[0]
+            for v in url_template.nodelist
+            if isinstance(v, VariableNode)
+        )
+
+        # If the "page" variable was used when rendering the URL, assume that
+        # the remote endpoint has handled pagination already.
+        paginated = "page" in url_template_vars
+
+        return url_template.render(url_template_context), paginated
+
+    @classmethod
+    def get_response_json(
+        cls,
+        request: HttpRequest,
+        field: "BaseField",
+        url: str,
+        **form_widget_options: Any,
+    ) -> Any:
+        """Make a request to the configured URL and return the JSON response.
+
+        Args:
+            request: The current HttRequest.
+            field: The BaseField instance.
+            url: The URL from which to fetch results.
+            form_widget_options: Options passed to the form widget.
+
+        Returns:
+            The response from the endpoint, as JSON.
+        """
+        parsed_url = urlparse.urlparse(url)
         response_json = None
 
         # If the configured URL is just a path, we might be able to simply
@@ -800,13 +815,6 @@ class AutocompleteSelectField(FieldType):
             else:
                 view_func, args, kwargs = resolver_match
 
-                # Update the request to point to the configured URL.
-                request.META["QUERY_STRING"] = parsed_url.query
-                request.GET = QueryDict(parsed_url.query)
-                request.path = parsed_url.path
-                request.path_info = parsed_url.path
-                request.resolver_match = resolver_match
-
                 # Invalidate cached properties affected by the request update.
                 for attr, value in type(request).__dict__.items():
                     if not isinstance(value, cached_property):
@@ -816,50 +824,123 @@ class AutocompleteSelectField(FieldType):
                     except AttributeError:
                         pass
 
+                # Update the request to point to the configured URL.
+                request.META["QUERY_STRING"] = parsed_url.query
+                request.GET = QueryDict(parsed_url.query)
+                request.path = parsed_url.path
+                request.path_info = parsed_url.path
+                request.resolver_match = resolver_match
+
                 # Call the view function with the updated request object.
                 response = view_func(request, *args, **kwargs)
                 response_json = json.loads(
-                    response.rendered_content
-                    if hasattr(response, "rendered_content")
-                    else response.content
+                    getattr(response, "rendered_content", response.content)
                 )
 
         # If we weren't able to call a local view tog et our results, we'll
         # make a regular GET request to the URL instead.
         if response_json is None:
-            rendered_url = request.build_absolute_uri(rendered_url)
-            response = requests.get(rendered_url)
+            response = requests.get(request.build_absolute_uri(url))
             response.raise_for_status()
             response_json = response.json()
 
+        return response_json
+
+    @classmethod
+    def extract_results(
+        cls,
+        request: HttpRequest,
+        field: "BaseField",
+        response_json: Any,
+        mapping: Optional[AutocompleteResultMapping] = None,
+        **form_widget_options: Any,
+    ) -> List[AutocompleteResult]:
+        """Extract a list of autocomplete results from the given response JSON.
+
+        Args:
+            request: The current HttpRequest.
+            field: The BaseField instance.
+            response_json: The raw JSON received from requesting the configured URL.
+            mapping: A mapping of key -> jmespath expression used to
+                translate each result from the URL response into an
+                autocomplete result.
+            form_widget_options: The form_widget_options configured for the field.
+
+        Returns:
+            List[AutocompleteResults]: A list of Select2-compatible autocomplete results.
+        """
+        results = []
+
+        # Define a default result mapping and merge the configured mapping into
+        # it, if given.
+        mapping = cast(
+            AutocompleteResultMapping,
+            {
+                "root": "@",
+                "value": "id",
+                "text": "text",
+                "extra": {},
+                **(mapping or {}),
+            },
+        )
+
         # Parse the search response and map each result to a Select2-compatible
         # dict with an "id" and a "text" property.
-        results_expr = jmespath.compile(results_path)
-        text_expr = jmespath.compile(text_path)
-        id_expr = jmespath.compile(id_path)
-
-        raw_results = results_expr.search(response_json) or []
+        raw_results = jp(mapping["root"], response_json) or []
         for result in raw_results:
-            result_text = text_expr.search(result)
-            result_value = id_expr.search(result)
+            result_text = jp(mapping["text"], result)
+            result_value = jp(mapping["value"], result, default=result_text)
+            result_extra = {k: jp(v, result) for k, v in mapping["extra"].items()}
 
-            if result_value is None:
-                result_value = result_text
+            result = {
+                "value": result_value,
+                "text": result_text,
+                "extra": result_extra,
+            }
 
             # The "id" is the value eventually stored in the database. In this
             # case, it is a stringified version of the result JSON so that it can
             # be deserialized when rendering the initial value for the widget.
-            result_id = stable_json(
-                {"id": str(result_value), "text": str(result_text), "extra": {}}
-            )
-
+            #
             # The use of "id" as opposed to "value" or something that makes
             # more semantic sense is to support the use of the select2
             # implementation that ships with the Django admin.
-            results.append({"id": result_id, "text": result_text})
+            result["id"] = stable_json(result)
+
+            results.append(result)
+
+        return results
+
+    @classmethod
+    def paginate_results(
+        cls,
+        request: HttpRequest,
+        field: "BaseField",
+        results: List[AutocompleteResult],
+        paginate: bool = True,
+        **form_widget_options: Any,
+    ) -> Tuple[List[AutocompleteResult], bool]:
+        """Paginate the given list of autocomplete results.
+
+        If paginate is True, uses Django's pagination tools to slice the result.
+
+        Args:
+            request: The current HttpRequest.
+            field: The BaseField instance.
+            results: The autocomplete results extracted from the call to the configured URL.
+            paginate: When True, paginates the result set. Otherwise assumes
+                that pagination has been handled already.
+            form_widget_options: The form_widget_options configured for the field.
+
+        Returns:
+            List[AutocompleteResults]: A list of Select2-compatible autocomplete results.
+        """
+        # Extract pagination info from the request.
+        page = int(request.GET.get("page", "1"))
+        per_page = int(request.GET.get("per_page", "100"))
 
         # If the remote endpoint isn't handling pagination, do it manually.
-        if "page" not in url_vars:
+        if paginate:
             paginated_page = Paginator(results, per_page).page(page)
             results, has_more = (
                 cast(List[AutocompleteResult], paginated_page.object_list),
@@ -874,6 +955,58 @@ class AutocompleteSelectField(FieldType):
             has_more = len(results) >= per_page
 
         return results, has_more
+
+    @classmethod
+    def autocomplete(
+        cls,
+        request: HttpRequest,
+        field: "BaseField",
+        url: Optional[str] = "",
+        **form_widget_options: Any,
+    ) -> Tuple[List[AutocompleteResult], bool]:
+        """Perform a search against the configured URL.
+
+        Returns a sequence of dicts, each with "id" and "text" values to use
+        within a select form element.
+
+        Args:
+            request: The HTTP request.
+            field: The Field record instance that uses this autocomplete.
+            url: The URL from which to retrieve autocomplete results.
+            form_widget_options: A dict of form widget options that can be
+                used to customize autocomplete behavior.
+
+        Returns:
+            Tuple[Sequence[AutocompleteResult], bool]: A two-tuple containing
+                a sequence of zero or more select2-compatible search results, and
+                a boolean indicating whether or not there are more results to
+                fetch.
+        """
+        # Initialize results with an empty list.
+        results: List[AutocompleteResult] = []
+        has_more = False
+
+        # If no URL has been configured, return results as-is.
+        if not url:
+            return results, has_more
+
+        rendered_url, paginated = cls.render_url(
+            request, field, url, **form_widget_options
+        )
+        response_json = cls.get_response_json(
+            request, field, rendered_url, **form_widget_options
+        )
+        results = cls.extract_results(
+            request, field, response_json, **form_widget_options
+        )
+
+        return cls.paginate_results(
+            request,
+            field,
+            results,
+            paginate=not paginated,
+            **form_widget_options,
+        )
 
 
 class AutocompleteSelectMultipleField(AutocompleteSelectField):

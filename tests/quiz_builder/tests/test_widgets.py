@@ -57,7 +57,7 @@ def test_autocomplete_select_empty_optional() -> None:
         data-close-on-select="true"
         data-disabled="false"
         data-placeholder=""
-        data-tags="true"
+        data-tags="false"
         data-theme="admin-autocomplete"
         name="test">
     <option value="">
@@ -96,7 +96,7 @@ def test_autocomplete_select_empty_required() -> None:
         data-close-on-select="true"
         data-disabled="false"
         data-placeholder=""
-        data-tags="true"
+        data-tags="false"
         data-theme="admin-autocomplete"
         name="test">
     </select>
@@ -136,7 +136,7 @@ def test_autocomplete_select_single_value_required() -> None:
         data-close-on-select="true"
         data-disabled="false"
         data-placeholder=""
-        data-tags="true"
+        data-tags="false"
         data-theme="admin-autocomplete"
         name="test">
     <option selected value='{"id":"1","text":"Test option"}'>Test option</option>
@@ -154,7 +154,7 @@ def test_autocomplete_select_single_value_required() -> None:
 def test_autocomplete_select_single_value_freetext() -> None:
     """Ensure that a required autocomplete renders its selected value as its
     only option."""
-    widget = AutocompleteSelect()
+    widget = AutocompleteSelect(allow_freetext=True)
     widget.is_required = True
 
     field_name = "test"
@@ -193,16 +193,6 @@ def test_autocomplete_select_single_value_freetext() -> None:
         value=json.dumps(widget_value),
         expected_html=expected_html,
     )
-
-
-def test_autocomplete_select_freetext_error() -> None:
-    """Ensure that an error is thrown for freetext values if allow_freetext is
-    False."""
-    widget = AutocompleteSelect()
-    widget.allow_freetext = False
-
-    with pytest.raises(ValueError):
-        widget.value_from_datadict(data={"test": "freetext"}, files=None, name="test")
 
 
 def test_autocomplete_select_format_decode() -> None:
@@ -250,7 +240,7 @@ def test_autocomplete_select_multiple_value_required() -> None:
         data-close-on-select="false"
         data-disabled="false"
         data-placeholder=""
-        data-tags="true"
+        data-tags="false"
         data-theme="admin-autocomplete"
         multiple
         name="test">

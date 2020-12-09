@@ -35,7 +35,7 @@ class AutocompleteSelect(Select):
     def __init__(
         self,
         url: Optional[str] = None,
-        allow_freetext: bool = True,
+        allow_freetext: bool = False,
         placeholder: Optional[str] = None,
         attrs: Optional[Dict[str, Any]] = None,
         choices: Sequence[Tuple[Any, Any]] = (),
@@ -148,10 +148,6 @@ class AutocompleteSelect(Select):
 
         Returns:
             List[str]: A list of JSON string values produced by the widget.
-
-        Raises:
-            ValueError: If a freetext value was given, but freetext is not
-                accepted by the widget.
         """
         value = super().value_from_datadict(data, files, name)
 
@@ -171,10 +167,6 @@ class AutocompleteSelect(Select):
             if v.startswith(("{", "[")) and v.endswith(("]", "}")):
                 parsed_v = json.loads(v)
             else:
-                if not self.allow_freetext:
-                    raise ValueError(
-                        f"Freetext options are not allowed. Expected JSON object but got {repr(v)}"
-                    )
                 parsed_v = json.loads(stable_json({"id": v, "text": v}))
 
             parsed_value.append(parsed_v)

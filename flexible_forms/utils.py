@@ -16,6 +16,7 @@ from typing import (
     Union,
 )
 
+import jmespath
 from simpleeval import DEFAULT_FUNCTIONS, DEFAULT_OPERATORS, SimpleEval
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -189,3 +190,18 @@ class LenientFormatter(Formatter):
             return super().get_value(key, args, kwargs)
         except (KeyError, IndexError):
             return ""
+
+
+def jp(expr: str, data: dict, default: Any = None) -> Any:
+    """A shorthand helper for querying dicts with jmespath.
+
+    Args:
+        expr: The JMESPath expression.
+        data: The dict to query.
+        default: The default value to return if the query returns None.
+
+    Returns:
+        Any: The result of the query, or the value of default.
+    """
+    result = jmespath.search(expression=expr, data=data)
+    return default if result is None else result
