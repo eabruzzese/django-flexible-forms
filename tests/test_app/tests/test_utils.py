@@ -1,5 +1,10 @@
 # -*- coding: utf-8 -*-
-from flexible_forms.utils import LenientFormatter, empty, replace_element
+from flexible_forms.utils import (
+    LenientFormatter,
+    empty,
+    get_expression_fields,
+    replace_element,
+)
 
 
 def test_empty() -> None:
@@ -65,3 +70,10 @@ def test_lenient_formatter() -> None:
         )
         == "Supplied keywords are interpolated: keyword"
     )
+
+
+def test_get_expression_fields() -> None:
+    """Ensure that a set of field names can be extracted from a JMESPath expression."""
+    assert get_expression_fields(
+        "join(', ', [field_1, field_2, field_2.field_2a, null])"
+    ) == set(["field_1", "field_2"])

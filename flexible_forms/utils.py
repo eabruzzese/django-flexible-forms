@@ -4,6 +4,7 @@
 
 import json
 from typing import (
+    Set,
     TYPE_CHECKING,
     Any,
     List,
@@ -17,6 +18,7 @@ from typing import (
 )
 
 import jmespath
+from jmespath.parser import ParsedResult, Parser
 from simpleeval import DEFAULT_FUNCTIONS, DEFAULT_OPERATORS, SimpleEval
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -205,3 +207,34 @@ def jp(expr: str, data: dict, default: Any = None) -> Any:
     """
     result = jmespath.search(expression=expr, data=data)
     return default if result is None else result
+
+
+def get_expression_fields(jmespath_expression: str) -> Set[str]:
+    """Return a list of fields referenced in the given JMESPath expression.
+
+    Args:
+        jmespath_expression: The expression for which to extract a list of
+            referenced fields.
+
+    Returns:
+        Set[str]: A set containing the names of fields referenced in the
+            expression.
+    """
+    return _get_fields(Parser().parse(jmespath_expression).parsed)
+
+
+def _get_fields(node: str, ignore_fields: Sequence[str] = ("null",)) -> Set[str]:
+    referenced_fields = set()
+
+    node_type = node["type"]
+    children = node["children"]
+    value = node.get("value")
+
+    if node_type == "field" and value not in ignore_fields:
+        referenced_fields.add(value)
+    elif node_type == "subexpression":
+        referenced_fields.update(_get_fields(children[0]))
+    else:
+        referenced_fields.update(*(_get_fields(c) for c in children))
+
+    return referenced_fields

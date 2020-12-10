@@ -6,6 +6,7 @@ import json
 import logging
 import urllib.parse as urlparse
 from typing import (
+    Set,
     TYPE_CHECKING,
     Any,
     Dict,
@@ -20,11 +21,13 @@ from typing import (
 
 import requests
 import simpleeval
+from django.apps import apps
 from django.core.paginator import Paginator
 from django.db.models import FileField, ImageField
-from django.db.models import fields as model_fields
+from django.db.models import Model as DjangoModel, QuerySet, fields as model_fields
 from django.forms import fields as form_fields
 from django.forms import widgets as form_widgets
+from django.forms import model_to_dict
 from django.http import HttpRequest, QueryDict
 from django.shortcuts import get_object_or_404
 from django.template import Context, Template
@@ -45,7 +48,12 @@ except ImportError:  # pragma: no cover
     from django.contrib.postgres.fields import JSONField
     from django.contrib.postgres.forms import JSONField as JSONFormField
 
-from flexible_forms.utils import evaluate_expression, jp, stable_json
+from flexible_forms.utils import (
+    evaluate_expression,
+    get_expression_fields,
+    jp,
+    stable_json,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -678,6 +686,13 @@ class AutocompleteSelectField(FieldType):
     form_widget_class = AutocompleteSelect
     model_field_class = JSONField
 
+    DEFAULT_RESULT_MAPPING: AutocompleteResultMapping = {
+        "root": "@",
+        "value": "id",
+        "text": "text",
+        "extra": {},
+    }
+
     @classmethod
     def as_form_widget(
         cls,
@@ -778,8 +793,9 @@ class AutocompleteSelectField(FieldType):
         # If the "page" variable was used when rendering the URL, assume that
         # the remote endpoint has handled pagination already.
         paginated = "page" in url_template_vars
+        filtered = "term" in url_template_vars
 
-        return url_template.render(url_template_context), paginated
+        return url_template.render(url_template_context), paginated, filtered
 
     @classmethod
     def get_response_json(
@@ -851,8 +867,10 @@ class AutocompleteSelectField(FieldType):
         cls,
         request: HttpRequest,
         field: "BaseField",
-        response_json: Any,
+        raw_results: Any,
         mapping: Optional[AutocompleteResultMapping] = None,
+        search_field: Optional[str] = None,
+        search_manually: bool = True,
         **form_widget_options: Any,
     ) -> List[AutocompleteResult]:
         """Extract a list of autocomplete results from the given response JSON.
@@ -860,7 +878,7 @@ class AutocompleteSelectField(FieldType):
         Args:
             request: The current HttpRequest.
             field: The BaseField instance.
-            response_json: The raw JSON received from requesting the configured URL.
+            raw_results: The raw JSON received from requesting the configured URL.
             mapping: A mapping of key -> jmespath expression used to
                 translate each result from the URL response into an
                 autocomplete result.
@@ -876,19 +894,27 @@ class AutocompleteSelectField(FieldType):
         mapping = cast(
             AutocompleteResultMapping,
             {
-                "root": "@",
-                "value": "id",
-                "text": "text",
-                "extra": {},
+                **cls.DEFAULT_RESULT_MAPPING,
                 **(mapping or {}),
             },
         )
 
+        search_term = request.GET.get("query", "")
+
         # Parse the search response and map each result to a Select2-compatible
         # dict with an "id" and a "text" property.
-        raw_results = jp(mapping["root"], response_json) or []
+        raw_results = jp(mapping["root"], raw_results) or []
         for result in raw_results:
             result_text = jp(mapping["text"], result)
+
+            # Exclude any results that don't contain the search term.
+            if search_manually:
+                searchable_text = str(
+                    result[search_field] if search_field else result_text
+                )
+                if search_term.casefold() not in searchable_text.casefold():
+                    continue
+
             result_value = jp(mapping["value"], result, default=result_text)
             result_extra = {k: jp(v, result) for k, v in mapping["extra"].items()}
 
@@ -917,7 +943,7 @@ class AutocompleteSelectField(FieldType):
         request: HttpRequest,
         field: "BaseField",
         results: List[AutocompleteResult],
-        paginate: bool = True,
+        paginate_manually: bool = True,
         **form_widget_options: Any,
     ) -> Tuple[List[AutocompleteResult], bool]:
         """Paginate the given list of autocomplete results.
@@ -940,7 +966,7 @@ class AutocompleteSelectField(FieldType):
         per_page = int(request.GET.get("per_page", "100"))
 
         # If the remote endpoint isn't handling pagination, do it manually.
-        if paginate:
+        if paginate_manually:
             paginated_page = Paginator(results, per_page).page(page)
             results, has_more = (
                 cast(List[AutocompleteResult], paginated_page.object_list),
@@ -990,27 +1016,122 @@ class AutocompleteSelectField(FieldType):
         if not url:
             return results, has_more
 
-        rendered_url, paginated = cls.render_url(
+        rendered_url, paginated, filtered = cls.render_url(
             request, field, url, **form_widget_options
         )
         response_json = cls.get_response_json(
             request, field, rendered_url, **form_widget_options
         )
         results = cls.extract_results(
-            request, field, response_json, **form_widget_options
+            request,
+            field,
+            response_json,
+            search_manually=not filtered,
+            **form_widget_options,
         )
 
         return cls.paginate_results(
             request,
             field,
             results,
-            paginate=not paginated,
+            paginate_manually=not paginated,
             **form_widget_options,
         )
 
 
 class AutocompleteSelectMultipleField(AutocompleteSelectField):
     """An autocomplete field that supports multiple selections."""
+
+    form_field_class = JSONFormField
+    form_widget_class = AutocompleteSelectMultiple
+
+
+class QuerysetAutocompleteSelectField(AutocompleteSelectField):
+    """An autocomplete field that sources options from a configured queryset."""
+
+    @classmethod
+    def extract_results(
+        cls,
+        request: HttpRequest,
+        field: "BaseField",
+        raw_results: "QuerySet[DjangoModel]",
+        mapping: Optional[AutocompleteResultMapping],
+        search_field: Optional[str] = None,
+        search_manually: bool = False,
+        **form_widget_options: Any,
+    ) -> List[AutocompleteResult]:
+        mapping = {**cls.DEFAULT_RESULT_MAPPING, **(mapping or {}), "root": "@"}
+
+        # Build a list of model fields referenced in the mapping expressions.
+        expression_fields = set()
+        for expr in (*mapping.values(), *mapping["extra"].values()):
+            if not isinstance(expr, str):
+                continue
+            expression_fields.update(get_expression_fields(expr))
+
+        # Map the model instances to dicts so they can be used with JMESPath.
+        json_results = [
+            {f: getattr(instance, f, None) for f in expression_fields}
+            for instance in raw_results.all()
+        ]
+
+        return super().extract_results(
+            request,
+            field,
+            raw_results=json_results,
+            mapping=mapping,
+            search_field=search_field,
+            search_manually=search_manually,
+            **form_widget_options,
+        )
+
+    @classmethod
+    def autocomplete(
+        cls,
+        request: HttpRequest,
+        field: "BaseField",
+        model: str,
+        filter: Optional[Dict[str, Any]] = None,
+        exclude: Optional[Dict[str, Any]] = None,
+        mapping: Optional[AutocompleteResultMapping] = None,
+        search_field: Optional[str] = None,
+        **form_widget_options: Any,
+    ) -> Tuple[List[AutocompleteResult], bool]:
+        # Build the queryset from the configured parameters.
+        model_cls = cast(DjangoModel, apps.get_model(model))
+        qs = (
+            model_cls._default_manager.filter(**(filter or {}))
+            .exclude(**(exclude or {}))
+            .order_by("pk")
+        )
+
+        # If the field is configured with a search_field, use it to filter results.
+        search_term = request.GET.get("term")
+        if search_term and search_field:
+            qs = qs.filter(**{f"{search_field}__icontains": search_term})
+
+        # Paginate the results first (to allow Django's paginator to work with the QuerySet).
+        results, has_more = cls.paginate_results(
+            request, field, results=qs, paginate_manually=True, **form_widget_options
+        )
+
+        # Map the results to options using the given mapping.
+        results = cls.extract_results(
+            request,
+            field,
+            raw_results=results,
+            mapping={
+                **(mapping or {}),
+                "root": "@",
+            },
+            search=False,
+        )
+
+        return results, has_more
+
+
+class QuerysetAutocompleteSelectMultipleField(QuerysetAutocompleteSelectField):
+    """A queryset autocomplete field that supports multiple selections."""
 
     form_field_class = JSONFormField
     form_widget_class = AutocompleteSelectMultiple
