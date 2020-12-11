@@ -955,7 +955,7 @@ class AutocompleteSelectField(FieldType):
         # Extract a list of variables used in rendering and create a dict of
         # them and their values to return along with the rendered URL.
         rendered_context = {
-            var: url_template_context[var]
+            var: url_template_context.get(var)
             for var in frozenset(
                 v.filter_expression.var.lookups[0]
                 for v in template.nodelist
@@ -1018,7 +1018,9 @@ class AutocompleteSelectField(FieldType):
                 # Call the view function with the updated request object.
                 response = view_func(request, *args, **kwargs)
                 response_json = json.loads(
-                    getattr(response, "rendered_content", response.content)
+                    response.rendered_content
+                    if hasattr(response, "rendered_content")
+                    else response.content
                 )
 
         # If we weren't able to call a local view to get our results, we'll
