@@ -73,7 +73,8 @@ def test_lenient_formatter() -> None:
 
 
 def test_get_expression_fields() -> None:
-    """Ensure that a set of field names can be extracted from a JMESPath expression."""
+    """Ensure that a set of field names can be extracted from a JMESPath
+    expression."""
     assert get_expression_fields(
         "join(', ', [field_1, field_2, field_2.field_2a, null])"
     ) == set(["field_1", "field_2"])

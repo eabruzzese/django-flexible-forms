@@ -4,13 +4,14 @@
 
 import json
 from typing import (
-    Set,
     TYPE_CHECKING,
     Any,
+    Dict,
     List,
     Mapping,
     Optional,
     Sequence,
+    Set,
     Tuple,
     Type,
     TypeVar,
@@ -18,7 +19,7 @@ from typing import (
 )
 
 import jmespath
-from jmespath.parser import ParsedResult, Parser
+from jmespath.parser import Parser
 from simpleeval import DEFAULT_FUNCTIONS, DEFAULT_OPERATORS, SimpleEval
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -194,12 +195,12 @@ class LenientFormatter(Formatter):
             return ""
 
 
-def jp(expr: str, data: dict, default: Any = None) -> Any:
+def jp(expr: str, data: Any, default: Any = None) -> Any:
     """A shorthand helper for querying dicts with jmespath.
 
     Args:
         expr: The JMESPath expression.
-        data: The dict to query.
+        data: The data to query.
         default: The default value to return if the query returns None.
 
     Returns:
@@ -223,15 +224,17 @@ def get_expression_fields(jmespath_expression: str) -> Set[str]:
     return _get_fields(Parser().parse(jmespath_expression).parsed)
 
 
-def _get_fields(node: str, ignore_fields: Sequence[str] = ("null",)) -> Set[str]:
-    referenced_fields = set()
+def _get_fields(
+    node: Dict[str, Any], ignore_fields: Sequence[str] = ("null",)
+) -> Set[str]:
+    referenced_fields: Set[str] = set()
 
     node_type = node["type"]
     children = node["children"]
     value = node.get("value")
 
     if node_type == "field" and value not in ignore_fields:
-        referenced_fields.add(value)
+        referenced_fields.add(str(value))
     elif node_type == "subexpression":
         referenced_fields.update(_get_fields(children[0]))
     else:

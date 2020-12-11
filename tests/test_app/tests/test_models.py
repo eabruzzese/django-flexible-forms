@@ -541,7 +541,10 @@ def test_noop_modifier_attribute() -> None:
     assert modifier.attribute in django_form.fields[field.name]._modifiers
 
 
-@settings(deadline=None, suppress_health_check=(HealthCheck.too_slow,))
+@settings(
+    deadline=None,
+    suppress_health_check=(HealthCheck.too_slow, HealthCheck.data_too_large),
+)
 @given(st.data())
 @pytest.mark.timeout(360)
 @pytest.mark.django_db

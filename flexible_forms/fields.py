@@ -6,13 +6,14 @@ import json
 import logging
 import urllib.parse as urlparse
 from typing import (
-    Set,
     TYPE_CHECKING,
     Any,
+    Collection,
     Dict,
-    List,
+    Iterable,
     Optional,
     Sequence,
+    Sized,
     Tuple,
     Type,
     TypedDict,
@@ -22,12 +23,13 @@ from typing import (
 import requests
 import simpleeval
 from django.apps import apps
+from django.core.exceptions import ImproperlyConfigured
 from django.core.paginator import Paginator
 from django.db.models import FileField, ImageField
-from django.db.models import Model as DjangoModel, QuerySet, fields as model_fields
+from django.db.models import Model as DjangoModel
+from django.db.models import fields as model_fields
 from django.forms import fields as form_fields
 from django.forms import widgets as form_widgets
-from django.forms import model_to_dict
 from django.http import HttpRequest, QueryDict
 from django.shortcuts import get_object_or_404
 from django.template import Context, Template
@@ -740,13 +742,168 @@ class AutocompleteSelectField(FieldType):
         )
 
     @classmethod
-    def render_url(
+    def autocomplete(
         cls,
         request: HttpRequest,
         field: "BaseField",
-        url: str,
         **form_widget_options: Any,
-    ) -> Tuple[str, bool]:
+    ) -> Tuple[Collection[AutocompleteResult], bool]:
+        """Perform a search against the configured URL.
+
+        Returns a sequence of dicts, each with "id" and "text" values to use
+        within a select form element.
+
+        Args:
+            request: The HTTP request.
+            field: The Field record instance that uses this autocomplete.
+            form_widget_options: A dict of form widget options that can be
+                used to customize autocomplete behavior.
+
+        Returns:
+            Tuple[Sequence[AutocompleteResult], bool]: A two-tuple containing
+                a sequence of zero or more select2-compatible search results, and
+                a boolean indicating whether or not there are more results to
+                fetch.
+        """
+        # Extract GET parameters common to all autocomplete fields.
+        search_term = request.GET.get("term", "")
+        record_pk = request.GET.get("record_pk")
+        page = int(request.GET.get("page", "1"))
+        per_page = int(request.GET.get("per_page", "50"))
+
+        raw_results, has_more, filtered, paginated = cls.get_raw_results(
+            request,
+            field,
+            search_term=search_term,
+            record_pk=int(record_pk) if record_pk else None,
+            page=page,
+            per_page=per_page,
+            **form_widget_options,
+        )
+
+        if not filtered:
+            raw_results = cls.filter_raw_results(
+                request,
+                field,
+                raw_results=raw_results,
+                search_term=search_term,
+                **form_widget_options,
+            )
+
+        if not paginated:
+            raw_results, has_more = cls.paginate_raw_results(
+                request,
+                field,
+                raw_results=raw_results,
+                page=page,
+                per_page=per_page,
+                **form_widget_options,
+            )
+
+        mapped_results = cls.map_raw_results(
+            request, field, raw_results=raw_results, **form_widget_options
+        )
+
+        return mapped_results, has_more
+
+    @classmethod
+    def get_raw_results(
+        cls,
+        request: HttpRequest,
+        field: "BaseField",
+        search_term: str,
+        record_pk: Optional[int],
+        page: int,
+        per_page: int,
+        **form_widget_options: Any,
+    ) -> Tuple[Collection[Any], bool, bool, bool]:
+        """Retrieve the "raw" results for the search.
+
+        Performs the initial fetch of results, as well as optionally
+        filtering them with the search term and/or paginating them with the
+        given page and per_page parameters.
+
+        It should *not* perform any mapping.
+
+        Args:
+            request: The current HttpRequest.
+            field: The BaseField instance.
+            search_term: The given search term.
+            record_pk: The primary key for the record being filled out.
+            page: The pagination page number.
+            per_page: The pagination page size.
+            form_widget_options: Options for the form widget.
+
+        Returns:
+            Tuple[Collection[Any], bool, bool, bool]: A collection of
+                unmapped results and three flags: has_more (indicating that
+                there are more results to be fetched with pagination),
+                filtered (whether the search_term has already been used to
+                filter the results), and paginated (whether the pagination
+                parameters have already been applied to the results).
+        """
+        url_template = form_widget_options.get("url", "")
+        raw_results, has_more, filtered, paginated = (
+            cast(Collection[Any], []),
+            False,
+            True,
+            True,
+        )
+
+        if not url_template:
+            return raw_results, has_more, filtered, paginated
+
+        rendered_url, template_variables = cls._render_url(
+            request,
+            field,
+            url_template=url_template,
+            record_pk=record_pk,
+            search_term=search_term,
+            page=page,
+            per_page=per_page,
+            **form_widget_options,
+        )
+
+        raw_results = cls._request_url(
+            request,
+            field,
+            **{
+                **form_widget_options,
+                "url": rendered_url,
+            },
+        )
+
+        mapping = cast(
+            AutocompleteResultMapping,
+            {
+                **cls.DEFAULT_RESULT_MAPPING,
+                **form_widget_options.get("mapping", {}),
+            },
+        )
+
+        raw_results = jp(mapping["root"], raw_results) or []
+
+        # Determine whether the URL was rendered with the search term and
+        # pagination info. These flags are used to determine if the
+        # autocomplete should attempt to manually search or paginate the
+        # results.
+        filtered = "term" in template_variables
+        paginated = "page" in template_variables
+
+        return raw_results, has_more, filtered, paginated
+
+    @classmethod
+    def _render_url(
+        cls,
+        request: HttpRequest,
+        field: "BaseField",
+        url_template: str,
+        search_term: str,
+        record_pk: Optional[int],
+        page: int,
+        per_page: int,
+        **form_widget_options: Any,
+    ) -> Tuple[str, Dict[str, Any]]:
         """Render the URL using DTL.
 
         Uses the record (if available) and the request's GET parameters as
@@ -755,19 +912,23 @@ class AutocompleteSelectField(FieldType):
         Args:
             request: The current HttpRequest.
             field: The BaseField instance.
-            url: The url configured in the form_widget_options.
+            url_template: The url template string configured in the form_widget_options.
+            search_term: The search_term for filtering the results.
+            record_pk: The primary key of the record currently being filled.
+            page: The pagination page number.
+            per_page: The pagination page size.
             form_widget_options: Options passed to the form widget.
 
         Returns:
-            Tuple[str, bool]: The rendered URL and a flag indicating whether
-                pagination was handled by the remote endpoint or not.
+            Tuple[str, Dict[str, Any]]: The rendered URL and a dict
+                containing the names and values of the variables used to
+                render it.
         """
         # Prevent a circular import.
         from flexible_forms.models import BaseRecord
 
         # If autocompletion was requested for a specific record, fetch it using
         # the given primary key. Otherwise, make a blank record.
-        record_pk = request.GET.get("record_pk", None)
         record_model = field.flexible_forms.get_model(BaseRecord)
         record = (
             get_object_or_404(record_model, pk=record_pk)
@@ -777,28 +938,35 @@ class AutocompleteSelectField(FieldType):
 
         # Render the URL as a Django Template, feeding it the current field
         # values, the record instance ("meta"), and the GET parameters.
-        url_template = Template(url)
+        template = Template(url_template)
         record_variable = (
             (record._meta.verbose_name or "record").lower().replace(" ", "_")
         )
-        url_template_context = Context({record_variable: record, **request.GET.dict()})
-
-        # Extract a list of variables referenced in the template.
-        url_template_vars = frozenset(
-            v.filter_expression.var.lookups[0]
-            for v in url_template.nodelist
-            if isinstance(v, VariableNode)
+        url_template_context = Context(
+            {
+                record_variable: record,
+                **request.GET.dict(),
+                "search_term": search_term,
+                "page": page,
+                "per_page": per_page,
+            }
         )
 
-        # If the "page" variable was used when rendering the URL, assume that
-        # the remote endpoint has handled pagination already.
-        paginated = "page" in url_template_vars
-        filtered = "term" in url_template_vars
+        # Extract a list of variables used in rendering and create a dict of
+        # them and their values to return along with the rendered URL.
+        rendered_context = {
+            var: url_template_context[var]
+            for var in frozenset(
+                v.filter_expression.var.lookups[0]
+                for v in template.nodelist
+                if isinstance(v, VariableNode)
+            )
+        }
 
-        return url_template.render(url_template_context), paginated, filtered
+        return cast(str, template.render(url_template_context)), rendered_context
 
     @classmethod
-    def get_response_json(
+    def _request_url(
         cls,
         request: HttpRequest,
         field: "BaseField",
@@ -853,7 +1021,7 @@ class AutocompleteSelectField(FieldType):
                     getattr(response, "rendered_content", response.content)
                 )
 
-        # If we weren't able to call a local view tog et our results, we'll
+        # If we weren't able to call a local view to get our results, we'll
         # make a regular GET request to the URL instead.
         if response_json is None:
             response = requests.get(request.build_absolute_uri(url))
@@ -863,29 +1031,98 @@ class AutocompleteSelectField(FieldType):
         return response_json
 
     @classmethod
-    def extract_results(
+    def filter_raw_results(
         cls,
         request: HttpRequest,
         field: "BaseField",
-        raw_results: Any,
-        mapping: Optional[AutocompleteResultMapping] = None,
-        search_field: Optional[str] = None,
-        search_manually: bool = True,
+        raw_results: Collection[Any],
+        search_term: str,
         **form_widget_options: Any,
-    ) -> List[AutocompleteResult]:
+    ) -> Collection[Any]:
+        """Filter a collection of raw results with the given search_term.
+
+        If searching was not handled when fetching the raw results, it can be
+        performed manually here.
+
+        Args:
+            request: The current HttpRequest.
+            field: The BaseField instance.
+            raw_results: The collection of raw results.
+            search_term: The term to filter results with.
+            form_widget_options: The options passed to the form widget.
+
+        Returns:
+            Collection[Any]: A filtered collection of raw results.
+        """
+        if not search_term:
+            return raw_results
+
+        mapping = cast(
+            AutocompleteResultMapping,
+            {**cls.DEFAULT_RESULT_MAPPING, **form_widget_options.get("mapping", {})},
+        )
+        search_field = form_widget_options.get("search_field", mapping["text"])
+
+        filtered_results = []
+        for raw_result in raw_results or []:
+            search_text = jp(search_field, dict(raw_result))
+
+            # If the search term doesn't exist in the result, skip it.
+            if search_term.casefold() not in str(search_text).casefold():
+                continue
+
+            filtered_results.append(raw_result)
+
+        return filtered_results
+
+    @classmethod
+    def paginate_raw_results(
+        cls,
+        request: HttpRequest,
+        field: "BaseField",
+        raw_results: Sized,
+        page: int,
+        per_page: int,
+        **form_widget_options: Any,
+    ) -> Tuple[Collection[Any], bool]:
+        """Paginate a collection of raw results.
+
+        Args:
+            request: The current HttpRequest.
+            field: The BaseField instance.
+            raw_results: The unpaginated collection of raw results.
+            page: The pagination page number.
+            per_page: The pagination page size.
+            form_widget_options: The options passed to the form widget.
+
+        Returns:
+            Tuple[Collection[Any], bool]: The list of objects in the current
+                pagination page, and a flag indicating whether there are more
+                results to fetch.
+        """
+        paginator = Paginator(raw_results, per_page)
+        paginated_page = paginator.page(page)
+
+        return paginated_page.object_list, paginated_page.has_next()
+
+    @classmethod
+    def map_raw_results(
+        cls,
+        request: HttpRequest,
+        field: "BaseField",
+        raw_results: Iterable[Any],
+        **form_widget_options: Any,
+    ) -> Collection[AutocompleteResult]:
         """Extract a list of autocomplete results from the given response JSON.
 
         Args:
             request: The current HttpRequest.
             field: The BaseField instance.
             raw_results: The raw JSON received from requesting the configured URL.
-            mapping: A mapping of key -> jmespath expression used to
-                translate each result from the URL response into an
-                autocomplete result.
             form_widget_options: The form_widget_options configured for the field.
 
         Returns:
-            List[AutocompleteResults]: A list of Select2-compatible autocomplete results.
+            Collection[AutocompleteResults]: A list of Select2-compatible autocomplete results.
         """
         results = []
 
@@ -895,26 +1132,16 @@ class AutocompleteSelectField(FieldType):
             AutocompleteResultMapping,
             {
                 **cls.DEFAULT_RESULT_MAPPING,
-                **(mapping or {}),
+                **form_widget_options.get("mapping", {}),
             },
         )
 
-        search_term = request.GET.get("query", "")
-
         # Parse the search response and map each result to a Select2-compatible
         # dict with an "id" and a "text" property.
-        raw_results = jp(mapping["root"], raw_results) or []
         for result in raw_results:
+            # print(repr(mapping))
+            # print(repr(result))
             result_text = jp(mapping["text"], result)
-
-            # Exclude any results that don't contain the search term.
-            if search_manually:
-                searchable_text = str(
-                    result[search_field] if search_field else result_text
-                )
-                if search_term.casefold() not in searchable_text.casefold():
-                    continue
-
             result_value = jp(mapping["value"], result, default=result_text)
             result_extra = {k: jp(v, result) for k, v in mapping["extra"].items()}
 
@@ -937,107 +1164,6 @@ class AutocompleteSelectField(FieldType):
 
         return results
 
-    @classmethod
-    def paginate_results(
-        cls,
-        request: HttpRequest,
-        field: "BaseField",
-        results: List[AutocompleteResult],
-        paginate_manually: bool = True,
-        **form_widget_options: Any,
-    ) -> Tuple[List[AutocompleteResult], bool]:
-        """Paginate the given list of autocomplete results.
-
-        If paginate is True, uses Django's pagination tools to slice the result.
-
-        Args:
-            request: The current HttpRequest.
-            field: The BaseField instance.
-            results: The autocomplete results extracted from the call to the configured URL.
-            paginate: When True, paginates the result set. Otherwise assumes
-                that pagination has been handled already.
-            form_widget_options: The form_widget_options configured for the field.
-
-        Returns:
-            List[AutocompleteResults]: A list of Select2-compatible autocomplete results.
-        """
-        # Extract pagination info from the request.
-        page = int(request.GET.get("page", "1"))
-        per_page = int(request.GET.get("per_page", "100"))
-
-        # If the remote endpoint isn't handling pagination, do it manually.
-        if paginate_manually:
-            paginated_page = Paginator(results, per_page).page(page)
-            results, has_more = (
-                cast(List[AutocompleteResult], paginated_page.object_list),
-                paginated_page.has_next(),
-            )
-
-        # If the remote endpoint is handling pagination for us, we can assume
-        # that there are more results if the number of results received is
-        # greater than or equal to our per_page value (i.e., we received a full
-        # page of results).
-        else:
-            has_more = len(results) >= per_page
-
-        return results, has_more
-
-    @classmethod
-    def autocomplete(
-        cls,
-        request: HttpRequest,
-        field: "BaseField",
-        url: Optional[str] = "",
-        **form_widget_options: Any,
-    ) -> Tuple[List[AutocompleteResult], bool]:
-        """Perform a search against the configured URL.
-
-        Returns a sequence of dicts, each with "id" and "text" values to use
-        within a select form element.
-
-        Args:
-            request: The HTTP request.
-            field: The Field record instance that uses this autocomplete.
-            url: The URL from which to retrieve autocomplete results.
-            form_widget_options: A dict of form widget options that can be
-                used to customize autocomplete behavior.
-
-        Returns:
-            Tuple[Sequence[AutocompleteResult], bool]: A two-tuple containing
-                a sequence of zero or more select2-compatible search results, and
-                a boolean indicating whether or not there are more results to
-                fetch.
-        """
-        # Initialize results with an empty list.
-        results: List[AutocompleteResult] = []
-        has_more = False
-
-        # If no URL has been configured, return results as-is.
-        if not url:
-            return results, has_more
-
-        rendered_url, paginated, filtered = cls.render_url(
-            request, field, url, **form_widget_options
-        )
-        response_json = cls.get_response_json(
-            request, field, rendered_url, **form_widget_options
-        )
-        results = cls.extract_results(
-            request,
-            field,
-            response_json,
-            search_manually=not filtered,
-            **form_widget_options,
-        )
-
-        return cls.paginate_results(
-            request,
-            field,
-            results,
-            paginate_manually=not paginated,
-            **form_widget_options,
-        )
-
 
 class AutocompleteSelectMultipleField(AutocompleteSelectField):
     """An autocomplete field that supports multiple selections."""
@@ -1047,56 +1173,55 @@ class AutocompleteSelectMultipleField(AutocompleteSelectField):
 
 
 class QuerysetAutocompleteSelectField(AutocompleteSelectField):
-    """An autocomplete field that sources options from a configured queryset."""
+    """An autocomplete field that sources options from a queryset."""
 
     @classmethod
-    def extract_results(
+    def get_raw_results(
         cls,
         request: HttpRequest,
         field: "BaseField",
-        raw_results: "QuerySet[DjangoModel]",
-        mapping: Optional[AutocompleteResultMapping],
-        search_field: Optional[str] = None,
-        search_manually: bool = False,
+        search_term: str,
+        record_pk: Optional[int],
+        page: int,
+        per_page: int,
         **form_widget_options: Any,
-    ) -> List[AutocompleteResult]:
-        mapping = {**cls.DEFAULT_RESULT_MAPPING, **(mapping or {}), "root": "@"}
+    ) -> Tuple[Collection[Any], bool, bool, bool]:
+        """Retrieve the "raw" results for the search.
 
-        # Build a list of model fields referenced in the mapping expressions.
-        expression_fields = set()
-        for expr in (*mapping.values(), *mapping["extra"].values()):
-            if not isinstance(expr, str):
-                continue
-            expression_fields.update(get_expression_fields(expr))
+        Performs the initial fetch of results, as well as optionally
+        filtering them with the search term and/or paginating them with the
+        given page and per_page parameters.
 
-        # Map the model instances to dicts so they can be used with JMESPath.
-        json_results = [
-            {f: getattr(instance, f, None) for f in expression_fields}
-            for instance in raw_results.all()
-        ]
+        It should *not* perform any mapping.
 
-        return super().extract_results(
-            request,
-            field,
-            raw_results=json_results,
-            mapping=mapping,
-            search_field=search_field,
-            search_manually=search_manually,
-            **form_widget_options,
-        )
+        Args:
+            request: The current HttpRequest.
+            field: The BaseField instance.
+            search_term: The given search term.
+            record_pk: The primary key for the record being filled out.
+            page: The pagination page number.
+            per_page: The pagination page size.
+            form_widget_options: The options passed to the form widget.
 
-    @classmethod
-    def autocomplete(
-        cls,
-        request: HttpRequest,
-        field: "BaseField",
-        model: str,
-        filter: Optional[Dict[str, Any]] = None,
-        exclude: Optional[Dict[str, Any]] = None,
-        mapping: Optional[AutocompleteResultMapping] = None,
-        search_field: Optional[str] = None,
-        **form_widget_options: Any,
-    ) -> Tuple[List[AutocompleteResult], bool]:
+        Returns:
+            Tuple[Collection[Any], bool, bool, bool]: A collection of
+                unmapped results and three flags: has_more (indicating that
+                there are more results to be fetched with pagination),
+                filtered (whether the search_term has already been used to
+                filter the results), and paginated (whether the pagination
+                parameters have already been applied to the results).
+
+        Raises:
+            ImproperlyConfigured: if the search_field is not a concrete field
+                on the configured model.
+        """
+        # Extract the relevant configuration from the form widget options.
+        model = form_widget_options["model"]
+        filter = form_widget_options.get("filter", {})
+        exclude = form_widget_options.get("exclude", {})
+        mapping = form_widget_options.get("mapping", {})
+        search_field = form_widget_options.get("search_field")
+
         # Build the queryset from the configured parameters.
         model_cls = cast(DjangoModel, apps.get_model(model))
         qs = (
@@ -1105,29 +1230,71 @@ class QuerysetAutocompleteSelectField(AutocompleteSelectField):
             .order_by("pk")
         )
 
-        # If the field is configured with a search_field, use it to filter results.
-        search_term = request.GET.get("term")
+        # If the field is configured with a search_field, and that search field
+        # is able to be filtered at the database level, use it to filter
+        # results instead of doing it manually later.
         if search_term and search_field:
+            # If the search_field is not a concrete model field, it can't be used to filter results.
+            if not search_field in set(f.name for f in model_cls._meta.concrete_fields):
+                raise ImproperlyConfigured(
+                    f"The search_field option for {cls.__name__} fields must be a concrete model field."
+                )
             qs = qs.filter(**{f"{search_field}__icontains": search_term})
 
-        # Paginate the results first (to allow Django's paginator to work with the QuerySet).
-        results, has_more = cls.paginate_results(
-            request, field, results=qs, paginate_manually=True, **form_widget_options
-        )
+        paginator = Paginator(qs, per_page)
+        paginated_page = paginator.page(page)
 
-        # Map the results to options using the given mapping.
-        results = cls.extract_results(
-            request,
-            field,
-            raw_results=results,
-            mapping={
-                **(mapping or {}),
+        raw_results, has_more = (paginated_page.object_list, paginated_page.has_next())
+
+        return raw_results, has_more, True, True
+
+    @classmethod
+    def map_raw_results(
+        cls,
+        request: HttpRequest,
+        field: "BaseField",
+        raw_results: Iterable[Any],
+        **form_widget_options: Any,
+    ) -> Collection[AutocompleteResult]:
+        """Extract a list of autocomplete results from the given iterable.
+
+        Args:
+            request: The current HttpRequest.
+            field: The BaseField instance.
+            raw_results: The raw JSON received from requesting the configured URL.
+            form_widget_options: The form_widget_options configured for the field.
+
+        Returns:
+            Collection[AutocompleteResults]: A list of Select2-compatible autocomplete results.
+        """
+        mapping = cast(
+            AutocompleteResultMapping,
+            {
+                **cls.DEFAULT_RESULT_MAPPING,
+                **form_widget_options.get("mapping", {}),
                 "root": "@",
             },
-            search=False,
         )
 
-        return results, has_more
+        # Build a list of model fields referenced in the mapping expressions.
+        expression_fields = set()
+        for expr in (*mapping.values(), *mapping["extra"].values()):
+            if not isinstance(expr, str):
+                continue
+            expression_fields.update(get_expression_fields(expr))
+
+        return super().map_raw_results(
+            request,
+            field,
+            raw_results=(
+                {f: getattr(instance, f, None) for f in expression_fields}
+                for instance in raw_results
+            ),
+            **{
+                **form_widget_options,
+                "mapping": mapping,
+            },
+        )
 
 
 class QuerysetAutocompleteSelectMultipleField(QuerysetAutocompleteSelectField):

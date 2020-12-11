@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 import json
-from django.contrib.auth import get_user
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ImproperlyConfigured
 from django.http import JsonResponse
 from django.test import RequestFactory
 from django.urls import reverse
@@ -92,7 +92,7 @@ EXPECTED_RESULTS = {
             "value": "Same as ID",
         },
     ],
-    "pagination": {"more": True},
+    "pagination": {"more": False},
 }
 
 
@@ -276,7 +276,8 @@ def test_autocomplete_manual_pagination(rf: RequestFactory, requests_mock) -> No
 
 @pytest.mark.django_db
 def test_autocomplete_search(rf: RequestFactory, requests_mock) -> None:
-    """Ensure that autocomplete fields filter their results with a search term."""
+    """Ensure that autocomplete fields filter their results with a search
+    term."""
     requests_mock.get(BASE_URL, text=json.dumps(MOCK_RESPONSE))
 
     expected_results = {
@@ -308,7 +309,7 @@ def test_autocomplete_search(rf: RequestFactory, requests_mock) -> None:
     )
 
     results = _get_autocomplete_results(
-        rf, question_field, page=1, per_page=5, query="mladji"
+        rf, question_field, page=1, per_page=5, term="mladji"
     )
 
     assert results == expected_results
@@ -316,7 +317,8 @@ def test_autocomplete_search(rf: RequestFactory, requests_mock) -> None:
 
 @pytest.mark.django_db
 def test_autocomplete_search_specific_field(rf: RequestFactory, requests_mock) -> None:
-    """Ensure that autocomplete fields filter their results with a search term."""
+    """Ensure that autocomplete fields filter their results with a search
+    term."""
     requests_mock.get(BASE_URL, text=json.dumps(MOCK_RESPONSE))
 
     expected_results = {
@@ -353,7 +355,7 @@ def test_autocomplete_search_specific_field(rf: RequestFactory, requests_mock) -
     )
 
     results = _get_autocomplete_results(
-        rf, question_field, page=1, per_page=5, query="p"
+        rf, question_field, page=1, per_page=5, term="p"
     )
 
     assert results == expected_results
@@ -413,7 +415,8 @@ def test_autocomplete_queryset(rf: RequestFactory, mocker) -> None:
 
 @pytest.mark.django_db
 def test_autocomplete_queryset_filter(rf: RequestFactory, mocker) -> None:
-    """Ensure that queryset autocomplete fields can be configured with filters."""
+    """Ensure that queryset autocomplete fields can be configured with
+    filters."""
     # Create a few test users.
     User.objects.bulk_create(User(username=f"User {n}") for n in range(1, 4))
 
@@ -467,7 +470,8 @@ def test_autocomplete_queryset_filter(rf: RequestFactory, mocker) -> None:
 
 @pytest.mark.django_db
 def test_autocomplete_queryset_exclude(rf: RequestFactory, mocker) -> None:
-    """Ensure that queryset autocomplete fields can be configured with excludes."""
+    """Ensure that queryset autocomplete fields can be configured with
+    excludes."""
     # Create a few test users.
     User.objects.bulk_create(User(username=f"User {n}") for n in range(1, 4))
 
@@ -574,7 +578,8 @@ def test_autocomplete_queryset_pagination(rf: RequestFactory, mocker) -> None:
 
 @pytest.mark.django_db
 def test_autocomplete_queryset_search(rf: RequestFactory, mocker) -> None:
-    """Ensure that queryset autocomplete fields are searchable if configured."""
+    """Ensure that queryset autocomplete fields are searchable if
+    configured."""
     # Create a few test users.
     User.objects.bulk_create(User(username=f"User {n}") for n in range(1, 4))
 
@@ -627,6 +632,27 @@ def test_autocomplete_queryset_search(rf: RequestFactory, mocker) -> None:
     )
 
     assert results == expected_results
+
+
+@pytest.mark.django_db
+def test_autocomplete_queryset_search_misconfigured(rf: RequestFactory, mocker) -> None:
+    """Ensure that queryset autocomplete fields are searchable if
+    configured."""
+    question_field = QuizQuestionFactory(
+        field_type=QuerysetAutocompleteSelectField.name,
+        form_widget_options={
+            "model": "auth.User",
+            "search_field": "not_a_field",
+            "mapping": {
+                "value": "pk",
+                "text": "username",
+            },
+        },
+    )
+
+    # An error should be raised because not_a_field is not a searchable model field.
+    with pytest.raises(ImproperlyConfigured):
+        _get_autocomplete_results(rf, question_field, page=1, per_page=5, term="user 2")
 
 
 def _get_autocomplete_results(rf, field, **query_params):
