@@ -11,9 +11,6 @@ main () {
     (
         cd "$TESTS_DIR" || exit 1
 
-        # Delete the HTML coverage report directory.
-        rm -rf htmlcov/
-
         # Run the pytest suite.
         poetry run pytest "$@"
     )

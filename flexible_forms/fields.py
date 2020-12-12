@@ -141,6 +141,9 @@ class FieldType(metaclass=FieldTypeMetaclass):
     Provides an interface to emit a model field, form field, or widget.
     """
 
+    # The name is set by the Metaclass when the class is initialized.
+    name: str
+
     class Meta:
         abstract = True
 

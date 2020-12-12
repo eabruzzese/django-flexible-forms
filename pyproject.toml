@@ -42,6 +42,8 @@ django-debug-toolbar = "^3.0"
 django-extensions = "^3.0.9"
 ipython = "<7.17"
 requests-mock = {extras = ["fixture"], version = "^1.8.0"}
+pytest-xdist = {extras = ["psutil"], version = "^2.1.0"}
+pytest-sugar = "^0.9.4"
 
 [tool.dephell.main]
 from = {format = "poetry", path = "pyproject.toml"}

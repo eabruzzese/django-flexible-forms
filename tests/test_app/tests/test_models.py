@@ -50,7 +50,7 @@ def test_form() -> None:
     assert form.name == ""
 
     # Ensure the form has a friendly string representation
-    assert str(form) == "Untitled AppForm"
+    assert str(form) == "Untitled App Form"
 
     # Ensure that a name is generated for the form upon save.
     form.label = "Test Form"
@@ -81,7 +81,7 @@ def test_field() -> None:
     assert field.name == ""
 
     # Ensure the field has a friendly string representation
-    assert str(field) == "New Field"
+    assert str(field) == "New App Field"
 
     # Ensure that a machine name is generated for the field on save.
     field.label = "Test Field"
@@ -140,7 +140,7 @@ def test_field_modifier() -> None:
     assert modifier._validated
 
     # Ensure the field modifier has a friendly string representation
-    assert str(modifier) == "required = True"
+    assert str(modifier) == "App Field Modifier (required = True)"
 
     # Field modifiers that reference fields that don't exist should raise a
     # ValidationError.
@@ -539,104 +539,6 @@ def test_noop_modifier_attribute() -> None:
     # The only effect an unhandled modifier should have is to be present in the
     # modifiers dict.
     assert modifier.attribute in django_form.fields[field.name]._modifiers
-
-
-@settings(
-    deadline=None,
-    suppress_health_check=(HealthCheck.too_slow, HealthCheck.data_too_large),
-)
-@given(st.data())
-@pytest.mark.timeout(360)
-@pytest.mark.django_db
-def test_record(
-    patch_field_strategies: ContextManagerFixture,
-    duration_strategy: st.SearchStrategy[timedelta],
-    rollback: ContextManagerFixture,
-    data: st.DataObject,
-) -> None:
-    """Ensure that Records can be produced from Forms.
-
-    Uses Hypothesis to fuzz-test the fields and find edge cases.
-    """
-    # Generate a form using one of each field type.
-    form = FormFactory(label="Kitchen Sink")
-
-    # Bulk create fields (one per supported field type).
-    AppField.objects.bulk_create(
-        FieldFactory.build(
-            form=form,
-            name=f"{field_type}_field",
-            field_type=field_type,
-            required=True,
-        )
-        for field_type in FIELD_TYPES.keys()
-    )
-
-    fields: Sequence[AppField] = ()
-    for field_type in FIELD_TYPES.keys():
-        field = FieldFactory.build(
-            form=form,
-            field_type=field_type,
-            required=True,
-        )
-
-        fields = (*fields, field)
-
-    with rollback():
-        # Fill out the form (and use the same strategy for the form field as
-        # the model field when handling durations)
-        with patch_field_strategies({forms.DurationField: duration_strategy}):
-            django_form = cast(
-                forms.ModelForm,
-                data.draw(from_form(type(form.as_django_form()))),
-            )
-
-        django_form.data["form"] = form
-
-        # Set the files attribute (file fields are read from here).
-        django_form.files = {
-            field: value
-            for field, value in django_form.data.items()
-            if isinstance(value, File)
-        }
-
-        # Assert that it's valid when filled out (and output the errors if it's
-        # not).
-        assert django_form.is_valid(), f"The form was not valid: {django_form.errors}"
-
-        # Assert that saving the Django form results in a Record instance.
-        record = django_form.save()
-        assert isinstance(record, AppRecord)
-
-        # Ensure form records and their attributes have a friendly string representation.
-        assert str(record) == f"{form.label} {record.pk}"
-        assert str(AppRecord()) == f"New Record"
-
-        sample_attribute = record.attributes.first()
-        assert (
-            str(sample_attribute)
-            == f"RecordAttribute {sample_attribute.pk} (record_id={sample_attribute.record_id}, field_id={sample_attribute.field_id})"
-        )
-
-        # Assert that each field value can be retrieved from the database and
-        # that it matches the value in the form's cleaned_data construct.
-        for field_name, cleaned_value in django_form.cleaned_data.items():
-            record_value = getattr(record, field_name)
-
-            # File comparisons
-            if isinstance(record_value, File):
-                assert record_value.size == cleaned_value.size
-                assert (
-                    hashlib.sha1(record_value.read()).hexdigest()
-                    == hashlib.sha1(cleaned_value.read()).hexdigest()
-                ), (
-                    f"The file cleaned by the RecordForm is different from "
-                    f"the file stored on the Record's '{field_name}' field."
-                )
-            else:
-                assert (
-                    record_value == cleaned_value
-                ), f"Expected the record {field_name} to have value {repr(cleaned_value)} but got {repr(record_value)}"
 
 
 @pytest.mark.django_db
