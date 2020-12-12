@@ -464,7 +464,7 @@ class BaseForm(FlexibleBaseModel):
         abstract = True
 
     def __str__(self) -> str:
-        return self.label or f"Untitled {self._meta.verbose_name.title()}"
+        return self.label or f"Untitled {cast(str, self._meta.verbose_name).title()}"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save the model.
@@ -704,7 +704,7 @@ class BaseField(FlexibleBaseModel):
         form_field_related_name = "fields"
 
     def __str__(self) -> str:
-        return self.label or f"New {self._meta.verbose_name.title()}"
+        return self.label or f"New {cast(str, self._meta.verbose_name).title()}"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save the model.
@@ -839,9 +839,7 @@ class BaseFieldModifier(FlexibleBaseModel):
         field_field_related_name = "modifiers"
 
     def __str__(self) -> str:
-        return (
-            f"{self._meta.verbose_name.title()} ({self.attribute} = {self.expression})"
-        )
+        return f"{cast(str, self._meta.verbose_name).title()} ({self.attribute} = {self.expression})"
 
     def clean(self) -> None:
         """Ensure that the expression is valid for the form.
@@ -975,7 +973,10 @@ class BaseFieldset(FlexibleBaseModel):
 
     def __str__(self) -> str:
         return " ".join(
-            filter(bool, [self._meta.verbose_name.title(), self.name, f"({self.pk})"])
+            filter(
+                bool,
+                [cast(str, self._meta.verbose_name).title(), self.name, f"({self.pk})"],
+            )
         )
 
 
@@ -1022,7 +1023,7 @@ class BaseFieldsetItem(FlexibleBaseModel):
         fieldset_field_related_name = "items"
 
     def __str__(self) -> str:
-        return f"{self._meta.verbose_name.title()} {self.pk} for field {self.field_id}"
+        return f"{cast(str, self._meta.verbose_name).title()} {self.pk} for field {self.field_id}"
 
 
 class RecordManager(models.Manager):
@@ -1112,7 +1113,7 @@ class BaseRecord(FlexibleBaseModel):
             self.form.label
             if self.__dict__.get("form")
             or self._meta.get_field("form").get_cached_value(self)
-            else self._meta.verbose_name.title()
+            else cast(str, self._meta.verbose_name).title()
         )
 
         return f"New {record_type}" if not self.pk else f"{record_type} {self.pk}"
@@ -1324,7 +1325,7 @@ class BaseRecordAttribute(FlexibleBaseModel):
         record_field_related_name = "attributes"
 
     def __str__(self) -> str:
-        return f"{self._meta.verbose_name.title()} {self.pk}"
+        return f"{cast(str, self._meta.verbose_name).title()} {self.pk}"
 
     @classmethod
     def get_value_field_name(cls, field_type: str) -> str:

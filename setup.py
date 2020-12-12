@@ -41,7 +41,8 @@ setup(
             "psycopg2-binary==2.*,>=2.8.6", "pydocstyle==5.*,>=5.1.1",
             "pytest==6.*,>=6.0.1", "pytest-cov==2.*,>=2.10.1",
             "pytest-django==3.*,>=3.9.0", "pytest-mock==3.*,>=3.3.1",
-            "pytest-randomly==3.*,>=3.4.1", "pytest-timeout==1.*,>=1.4.2",
+            "pytest-randomly==3.*,>=3.4.1", "pytest-sugar==0.*,>=0.9.4",
+            "pytest-timeout==1.*,>=1.4.2", "pytest-xdist[psutil]==2.*,>=2.1.0",
             "requests-mock[fixture]==1.*,>=1.8.0", "sphinx==3.*,>=3.2.1",
             "sphinx-autoapi==1.*,>=1.5.0"
         ]

@@ -1,21 +1,17 @@
 # -*- coding: utf-8 -*-
-from datetime import timedelta
 import hashlib
+from datetime import timedelta
 from typing import cast
+
+import pytest
 from django import forms
 from django.core.files import File
-from hypothesis import HealthCheck, given, settings, strategies as st
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 from hypothesis.extra.django import from_form
-import pytest
-
 from quiz_builder.models import QuizSubmission
 
-from flexible_forms.fields import (
-    FIELD_TYPES,
-    FieldType,
-    FileUploadField,
-    ImageUploadField,
-)
+from flexible_forms.fields import FIELD_TYPES, FieldType
 
 from .factories import QuizFactory, QuizQuestionFactory
 
