@@ -18,7 +18,6 @@ from typing import (
     Type,
     cast,
 )
-from typing_extensions import TypedDict
 
 import requests
 import simpleeval
@@ -36,6 +35,7 @@ from django.template import Context, Template
 from django.template.base import VariableNode
 from django.urls import Resolver404, resolve, reverse
 from django.utils.functional import cached_property
+from typing_extensions import TypedDict
 
 from flexible_forms.widgets import (
     AutocompleteResult,
