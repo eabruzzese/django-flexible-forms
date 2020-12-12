@@ -16,9 +16,9 @@ from typing import (
     Sized,
     Tuple,
     Type,
-    TypedDict,
     cast,
 )
+from typing_extensions import TypedDict
 
 import requests
 import simpleeval
