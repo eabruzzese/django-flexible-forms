@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 from flexible_forms.utils import (
-    LenientFormatter,
     empty,
     get_expression_fields,
+    interpolate,
     replace_element,
 )
 
@@ -30,51 +30,71 @@ def test_empty() -> None:
 def test_replace_element() -> None:
     """Ensure that replace_element recursively replaces elements in a data
     structure."""
+
+    # Replace "needle" with "replacement" in a nested complex haystack.
     needle = "needle"
-    replacement = "replacement"
     haystack = (
         ["needle", "not-needle", ("needle",)],
         "needle",
         "not-needle",
         set(["needle", "not-needle"]),
     )
+    replacement = "replaced"
+
     expected_result = (
-        ["replacement", "not-needle", ("replacement",)],
-        "replacement",
+        ["replaced", "not-needle", ("replaced",)],
+        "replaced",
         "not-needle",
-        set(["replacement", "not-needle"]),
+        set(["replaced", "not-needle"]),
     )
 
     assert replace_element(needle, replacement, haystack) == expected_result
 
 
-def test_lenient_formatter() -> None:
-    """Ensure that the LenientFormatter behaves as expected."""
-    formatter = LenientFormatter()
-
-    assert (
-        formatter.format("Missing indexes are blank: {0}")
-        == "Missing indexes are blank: "
-    )
-    assert (
-        formatter.format("Supplied indexes are interpolated: {0}", "zero")
-        == "Supplied indexes are interpolated: zero"
-    )
-    assert (
-        formatter.format("Missing keywords are blank: {keyword}")
-        == "Missing keywords are blank: "
-    )
-    assert (
-        formatter.format(
-            "Supplied keywords are interpolated: {keyword}", keyword="keyword"
-        )
-        == "Supplied keywords are interpolated: keyword"
-    )
-
-
 def test_get_expression_fields() -> None:
-    """Ensure that a set of field names can be extracted from a JMESPath
-    expression."""
-    assert get_expression_fields(
-        "join(', ', [field_1, field_2, field_2.field_2a, null])"
-    ) == set(["field_1", "field_2"])
+    """Ensure field names can be extracted from a JMESPath expression.
+
+    Ignores the special "null" field, and only returns first-level field
+    names.
+    """
+    expression = "join(', ', [field_1, field_2, field_2.field_2a, null])"
+    expected_fields = ("field_1", "field_2")
+
+    assert get_expression_fields(expression) == expected_fields
+
+
+def test_template_renderers() -> None:
+    """Ensure that the interpolate util can render complex types."""
+    test_structure = {
+        "test": "'{{first}}'",
+        "this": 1,
+        "dict": {
+            "with": {
+                "a": ["list", ["of"], 5, "{{variable}}", {"key": "and a {{variable}}"}]
+            }
+        },
+    }
+
+    expected_results = {
+        "test": "'the key is test'",
+        "this": 1,
+        "dict": {
+            "with": {
+                "a": [
+                    "list",
+                    ["of"],
+                    5,
+                    "string variable",
+                    {"key": "and a string variable"},
+                ]
+            }
+        },
+    }
+
+    assert (
+        interpolate(
+            test_structure,
+            context={"first": "the key is test", "variable": "string variable"},
+        )
+        == expected_results
+    )

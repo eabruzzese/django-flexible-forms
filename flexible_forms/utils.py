@@ -3,6 +3,7 @@
 """Common utilities."""
 
 import json
+from functools import lru_cache, singledispatch
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -11,7 +12,6 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
-    Set,
     Tuple,
     Type,
     TypeVar,
@@ -19,6 +19,8 @@ from typing import (
 )
 
 import jmespath
+from django.template import Context, Template
+from django.template.base import VariableNode
 from jmespath.parser import Parser
 from simpleeval import DEFAULT_FUNCTIONS, DEFAULT_OPERATORS, SimpleEval
 
@@ -156,45 +158,6 @@ def stable_json(data: Union[dict, list]) -> str:
     )
 
 
-from string import Formatter
-
-
-class LenientFormatter(Formatter):
-    """A more lenient version of the default string formatter.
-
-    If a given variable was not specified in the format() kwargs, its value will be an empty string.
-
-    For example:
-
-    >>> formatter = LenientFormatter()
-    >>> test_string = "This variable was not provided: {not_provided}, but this one was: {provided}."
-    >>> formatter.format(test_string, provided="a value")
-    >>> 'This variable was not provided: , but this one was: a value.'
-    """
-
-    def get_value(
-        self, key: Union[int, str], args: Sequence[Any], kwargs: Mapping[str, Any]
-    ) -> Any:
-        """Return the value for the given key from the args or kwargs.
-
-        If the key does not exist in the args or kwargs, an empty string is
-        returned.
-
-        Args:
-            key: The name of the string variable for which to resolve the
-                value.
-            args: Positional arguments given to format().
-            kwargs: keyword arguments given to format().
-
-        Returns:
-            Any: The value for key, if given, otherwise an empty string.
-        """
-        try:
-            return super().get_value(key, args, kwargs)
-        except (KeyError, IndexError):
-            return ""
-
-
 def jp(expr: str, data: Any, default: Any = None) -> Any:
     """A shorthand helper for querying dicts with jmespath.
 
@@ -210,7 +173,8 @@ def jp(expr: str, data: Any, default: Any = None) -> Any:
     return default if result is None else result
 
 
-def get_expression_fields(jmespath_expression: str) -> Set[str]:
+@lru_cache
+def get_expression_fields(jmespath_expression: str) -> Tuple[str, ...]:
     """Return a list of fields referenced in the given JMESPath expression.
 
     Args:
@@ -221,23 +185,119 @@ def get_expression_fields(jmespath_expression: str) -> Set[str]:
         Set[str]: A set containing the names of fields referenced in the
             expression.
     """
-    return _get_fields(Parser().parse(jmespath_expression).parsed)
+    return tuple(_get_fields(Parser().parse(jmespath_expression).parsed).keys())
 
 
 def _get_fields(
     node: Dict[str, Any], ignore_fields: Sequence[str] = ("null",)
-) -> Set[str]:
-    referenced_fields: Set[str] = set()
+) -> Dict[str, None]:
+    referenced_fields: Dict[str, None] = {}
 
     node_type = node["type"]
     children = node["children"]
     value = node.get("value")
 
     if node_type == "field" and value not in ignore_fields:
-        referenced_fields.add(str(value))
+        referenced_fields[str(value)] = None
     elif node_type == "subexpression":
         referenced_fields.update(_get_fields(children[0]))
     else:
-        referenced_fields.update(*(_get_fields(c) for c in children))
+        for child in children:
+            referenced_fields.update(_get_fields(child))
 
     return referenced_fields
+
+
+class RenderedString(str):
+    """A string with an attribute containing the render context.
+
+    The render_context property will be a dict containing the keys of
+    the variables used to render the string (variables in the original
+    context that were not used to render the string will be excluded).
+    """
+
+    render_context: Dict[str, Any]
+
+
+@singledispatch
+def interpolate(data: Any, context: Dict[str, Any]) -> Any:
+    """Interpolate the given data using DTL.
+
+    Handles (nested) dicts and lists and will interpolate strings containing DTL tokens.
+
+    Args:
+        data: The data to be interpolated.
+        context: The context with which to interpolate strings containing DTL tokens.
+
+    Returns:
+        Any: The interpolated data.
+    """
+    # The default implementation returns the data as-is.
+    return data
+
+
+@interpolate.register
+def _interpolate_str(data: str, context: Dict[str, Any]) -> RenderedString:
+    """Handles interpolation of string values.
+
+    Interpolates strings using the default Django Template Language engine.
+
+    Args:
+        data: The data to be interpolated.
+        context: The context with which to interpolate strings containing DTL tokens.
+
+    Returns:
+        RenderedString: The rendered string with a render_context property
+            containing the variables used in rendering.
+    """
+    # Render the given string as a Django template with the given context.
+    template = Template(data)
+    template_context = Context(context, autoescape=False)
+    rendered_string = RenderedString(template.render(template_context))
+
+    # Extract a list of variables used in rendering and create a dict of
+    # them and their values to return attached to the rendered string.
+    rendered_string.render_context = {
+        var: template_context.get(var)
+        for var in frozenset(
+            v.filter_expression.var.lookups[0]
+            for v in template.nodelist
+            if isinstance(v, VariableNode)
+        )
+    }
+
+    return rendered_string
+
+
+@interpolate.register
+def _interpolate_dict(data: dict, context: Dict[str, Any]) -> dict:
+    """Handles interpolation of dict values.
+
+    Interpolates the values of the dict as appropriate (renders strings, or
+    recurses for list or dict values).
+
+    Args:
+        data: The data to be interpolated.
+        context: The context with which to interpolate strings containing DTL tokens.
+
+    Returns:
+        dict: The interpolated dict.
+    """
+    return {k: interpolate(v, context) for k, v in data.items()}
+
+
+@interpolate.register
+def _interpolate_list(data: list, context: Dict[str, Any]) -> list:
+    """Handles interpolation of list values.
+
+    Interpolates the elements of the list as appropriate (renders strings, or
+    recurses for list or dict elements).
+
+    Args:
+        data: The list to be interpolated.
+        context: The context with which to interpolate strings containing DTL tokens.
+
+    Returns:
+        list: The interpolated list.
+    """
+    return [interpolate(v, context) for v in data]

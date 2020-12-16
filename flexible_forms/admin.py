@@ -3,7 +3,18 @@
 """Django admin configurations for flexible_forms."""
 
 import logging
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, cast
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    cast,
+)
 
 from django import forms
 from django.conf import settings
@@ -43,15 +54,18 @@ else:  # pragma: no cover
     TabularInline = admin.TabularInline
 
 
-DEFAULT_FORMFIELD_OVERRIDES = {
-    models.TextField: {
-        "widget": forms.widgets.TextInput(
-            attrs={
-                "size": "50",
-            },
-        ),
+DEFAULT_FORMFIELD_OVERRIDES = cast(
+    Mapping[Type[models.Field], Mapping[str, Any]],
+    {
+        models.TextField: {
+            "widget": forms.widgets.TextInput(
+                attrs={
+                    "size": "50",
+                },
+            ),
+        },
     },
-}
+)
 
 
 class FlexibleAdminMixin:
@@ -61,7 +75,7 @@ class FlexibleAdminMixin:
     formfield_overrides = DEFAULT_FORMFIELD_OVERRIDES
 
     @property
-    def exclude(self) -> Tuple[str, ...]:
+    def exclude(self) -> Sequence[str]:
         """Exclude alias fields from the admin form.
 
         Handles the case where the implementer has aliased one or more fields
@@ -373,7 +387,7 @@ class FormsAdmin(FlexibleAdminMixin, ModelAdmin):
         )  # noqa: S308, S703, E501
 
 
-class RecordsAdmin(FlexibleAdminMixin, admin.ModelAdmin):
+class RecordsAdmin(FlexibleAdminMixin, ModelAdmin):
     """An admin configuration for managing records."""
 
     class Meta:
@@ -398,15 +412,18 @@ class RecordsAdmin(FlexibleAdminMixin, admin.ModelAdmin):
         Returns:
             models.QuerySet[BaseRecord]: An optimized queryset.
         """
-        return (
-            super()
-            .get_queryset(*args, **kwargs)
-            .select_related("form")
-            .prefetch_related(
-                "form__fields__modifiers",
-                "form__fieldsets__items__field",
-                "attributes__field",
-            )
+        return cast(
+            "models.QuerySet[BaseRecord]",
+            (
+                super()
+                .get_queryset(*args, **kwargs)
+                .select_related("form")
+                .prefetch_related(
+                    "form__fields__modifiers",
+                    "form__fieldsets__items__field",
+                    "attributes__field",
+                )
+            ),
         )
 
     def _form_label(self, record: BaseRecord) -> SafeText:
@@ -446,7 +463,10 @@ class RecordsAdmin(FlexibleAdminMixin, admin.ModelAdmin):
         If the form has a fieldset configuration, use it instead of the
         default.
         """
-        default_fieldsets = super().get_fieldsets(request, obj)
+        default_fieldsets = cast(
+            List[Tuple[Optional[str], Dict[str, Any]]],
+            super().get_fieldsets(request, obj),
+        )
 
         if obj is None:
             return default_fieldsets
@@ -523,4 +543,4 @@ class RecordsAdmin(FlexibleAdminMixin, admin.ModelAdmin):
 
             return HttpResponseRedirect(change_url)
 
-        return super().add_view(request, *args, **kwargs)
+        return cast(HttpResponse, super().add_view(request, *args, **kwargs))

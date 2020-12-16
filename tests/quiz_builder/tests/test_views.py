@@ -10,9 +10,9 @@ from django.urls import reverse
 
 from flexible_forms import fields, views
 from flexible_forms.fields import (
-    AutocompleteSelectField,
     QuerysetAutocompleteSelectField,
     SingleLineTextField,
+    URLAutocompleteSelectField,
 )
 from tests.quiz_builder.tests.factories import QuizFactory, QuizQuestionFactory
 
@@ -107,8 +107,8 @@ def test_autocomplete_no_record(rf: RequestFactory, requests_mock) -> None:
     requests_mock.get(BASE_URL, text=json.dumps(MOCK_RESPONSE))
 
     question_field = QuizQuestionFactory(
-        field_type=AutocompleteSelectField.name,
-        form_widget_options={
+        field_type=URLAutocompleteSelectField.name,
+        field_type_options={
             "url": PAGINATED_URL,
             "mapping": {
                 "root": "data",
@@ -146,8 +146,8 @@ def test_autocomplete_with_record(rf: RequestFactory, requests_mock) -> None:
     )
     autocomplete_question = QuizQuestionFactory(
         quiz=quiz,
-        field_type=AutocompleteSelectField.name,
-        form_widget_options={
+        field_type=URLAutocompleteSelectField.name,
+        field_type_options={
             "url": dynamic_url,
             "mapping": {
                 "root": "data",
@@ -188,8 +188,8 @@ def test_autocomplete_no_url(rf: RequestFactory) -> None:
     other than an HTTP endpoint.
     """
     question_field = QuizQuestionFactory(
-        field_type=AutocompleteSelectField.name,
-        form_widget_options={
+        field_type=URLAutocompleteSelectField.name,
+        field_type_options={
             "url": "",
             "mapping": {
                 "root": "data",
@@ -216,8 +216,8 @@ def test_autocomplete_internal_url(rf: RequestFactory, mocker) -> None:
     )
 
     question_field = QuizQuestionFactory(
-        field_type=AutocompleteSelectField.name,
-        form_widget_options={
+        field_type=URLAutocompleteSelectField.name,
+        field_type_options={
             "url": "/dummy/endpoint?page={{page}}&per_page={{per_page}}",
             "mapping": {
                 "root": "data",
@@ -257,8 +257,8 @@ def test_autocomplete_manual_pagination(rf: RequestFactory, requests_mock) -> No
     }
 
     question_field = QuizQuestionFactory(
-        field_type=AutocompleteSelectField.name,
-        form_widget_options={
+        field_type=URLAutocompleteSelectField.name,
+        field_type_options={
             "url": BASE_URL,
             "mapping": {
                 "root": "data",
@@ -295,10 +295,10 @@ def test_autocomplete_search(rf: RequestFactory, requests_mock) -> None:
     }
 
     question_field = QuizQuestionFactory(
-        field_type=AutocompleteSelectField.name,
-        form_widget_options={
+        field_type=URLAutocompleteSelectField.name,
+        field_type_options={
             "url": BASE_URL,
-            "search_field": "name",
+            "search_fields": ["name"],
             "mapping": {
                 "root": "data",
                 "value": "_id",
@@ -342,8 +342,8 @@ def test_autocomplete_search_specific_field(rf: RequestFactory, requests_mock) -
     }
 
     question_field = QuizQuestionFactory(
-        field_type=AutocompleteSelectField.name,
-        form_widget_options={
+        field_type=URLAutocompleteSelectField.name,
+        field_type_options={
             "url": BASE_URL,
             "mapping": {
                 "root": "data",
@@ -399,7 +399,7 @@ def test_autocomplete_queryset(rf: RequestFactory, mocker) -> None:
 
     question_field = QuizQuestionFactory(
         field_type=QuerysetAutocompleteSelectField.name,
-        form_widget_options={
+        field_type_options={
             "model": "auth.User",
             "mapping": {
                 "value": "pk",
@@ -453,7 +453,7 @@ def test_autocomplete_queryset_filter(rf: RequestFactory, mocker) -> None:
 
     question_field = QuizQuestionFactory(
         field_type=QuerysetAutocompleteSelectField.name,
-        form_widget_options={
+        field_type_options={
             "model": "auth.User",
             "filter": {"pk__gt": 1},
             "mapping": {
@@ -508,7 +508,7 @@ def test_autocomplete_queryset_exclude(rf: RequestFactory, mocker) -> None:
 
     question_field = QuizQuestionFactory(
         field_type=QuerysetAutocompleteSelectField.name,
-        form_widget_options={
+        field_type_options={
             "model": "auth.User",
             "exclude": {"pk__lt": 2},
             "mapping": {
@@ -562,8 +562,9 @@ def test_autocomplete_queryset_pagination(rf: RequestFactory, mocker) -> None:
 
     question_field = QuizQuestionFactory(
         field_type=QuerysetAutocompleteSelectField.name,
-        form_widget_options={
+        field_type_options={
             "model": "auth.User",
+            "search_fields": ["username"],
             "mapping": {
                 "value": "pk",
                 "text": "username",
@@ -578,8 +579,7 @@ def test_autocomplete_queryset_pagination(rf: RequestFactory, mocker) -> None:
 
 @pytest.mark.django_db
 def test_autocomplete_queryset_search(rf: RequestFactory, mocker) -> None:
-    """Ensure that queryset autocomplete fields are searchable if
-    configured."""
+    """Ensure that queryset autocomplete fields are searchable."""
     # Create a few test users.
     User.objects.bulk_create(User(username=f"User {n}") for n in range(1, 4))
 
@@ -617,9 +617,9 @@ def test_autocomplete_queryset_search(rf: RequestFactory, mocker) -> None:
 
     question_field = QuizQuestionFactory(
         field_type=QuerysetAutocompleteSelectField.name,
-        form_widget_options={
+        field_type_options={
             "model": "auth.User",
-            "search_field": "username",
+            "search_fields": ["username"],
             "mapping": {
                 "value": "pk",
                 "text": "username",
@@ -635,14 +635,77 @@ def test_autocomplete_queryset_search(rf: RequestFactory, mocker) -> None:
 
 
 @pytest.mark.django_db
-def test_autocomplete_queryset_search_misconfigured(rf: RequestFactory, mocker) -> None:
-    """Ensure that queryset autocomplete fields are searchable if
-    configured."""
+def test_autocomplete_queryset_search_fallback(rf: RequestFactory, mocker) -> None:
+    """Ensure that queryset autocomplete fields fall back to searching fields
+    referenced in the mapping JMESPath expressions."""
+    # Create a few test users.
+    User.objects.bulk_create(
+        User(username=f"User {n}", email=f"user{n}@example.com") for n in range(1, 4)
+    )
+
+    expected_results = {
+        "pagination": {"more": False},
+        "results": [
+            # {
+            #     "extra": {},
+            #     "id": '{"extra":{},"text":"User 1","value":1}',
+            #     "text": "User 1, 1, user1@example.com",
+            #     "value": 1,
+            # },
+            # The search term should filter the queryset so that only this
+            # record is returned.
+            {
+                "extra": {},
+                "id": '{"extra":{},"text":"User 2, 2, user2@example.com","value":2}',
+                "text": "User 2, 2, user2@example.com",
+                "value": 2,
+            },
+            # {
+            #     "extra": {},
+            #     "id": '{"extra":{},"text":"User 3","value":3}',
+            #     "text": "User 3, 3, user3@example.com",
+            #     "value": 3,
+            # },
+        ],
+    }
+
+    mocker.patch.object(
+        fields,
+        "resolve",
+        return_value=(lambda *a, **kw: JsonResponse(MOCK_RESPONSE), (), {}),
+    )
+
     question_field = QuizQuestionFactory(
         field_type=QuerysetAutocompleteSelectField.name,
-        form_widget_options={
+        field_type_options={
             "model": "auth.User",
-            "search_field": "not_a_field",
+            "mapping": {
+                "value": "pk",
+                # Since no search_fields option was explicitly defined, the
+                # search mechanism will fall back to parsing the text mapping
+                # expression and automatically search each field referenced
+                # within it (if the field is a concrete model field).
+                "text": "join(', ', [username, to_string(pk), email])",
+            },
+        },
+    )
+
+    results = _get_autocomplete_results(
+        rf, question_field, page=1, per_page=5, term="user 2 2 user2@example.com"
+    )
+
+    assert results == expected_results
+
+
+@pytest.mark.django_db
+def test_autocomplete_queryset_search_misconfigured(rf: RequestFactory, mocker) -> None:
+    """Ensure that queryset autocomplete fields raise an error if search fields
+    are misconfigured."""
+    question_field = QuizQuestionFactory(
+        field_type=QuerysetAutocompleteSelectField.name,
+        field_type_options={
+            "model": "auth.User",
+            "search_fields": ["not_a_field"],
             "mapping": {
                 "value": "pk",
                 "text": "username",

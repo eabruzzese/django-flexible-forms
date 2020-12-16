@@ -669,6 +669,13 @@ class BaseField(FlexibleBaseModel):
         help_text="The form widget to use when displaying the field.",
     )
 
+    field_type_options = JSONField(
+        blank=True,
+        default=dict,
+        help_text="Custom configuration for field types (only used for custom fields).",
+        encoder=DjangoJSONEncoder,
+    )
+
     form_field_options = JSONField(
         blank=True,
         default=dict,
@@ -1395,7 +1402,7 @@ class BaseRecordAttribute(FlexibleBaseModel):
 # field.
 #
 for field_type_name, field_type in sorted(FIELD_TYPES.items(), key=lambda f: f[0]):
-    BaseRecordAttribute.add_to_class(  # type: ignore
+    BaseRecordAttribute.add_to_class(
         BaseRecordAttribute.get_value_field_name(field_type_name),
         field_type.as_model_field(blank=True, null=True, default=None),
     )

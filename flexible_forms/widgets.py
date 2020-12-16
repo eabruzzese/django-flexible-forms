@@ -15,12 +15,8 @@ from typing import (
 
 from django.contrib.admin.widgets import AutocompleteMixin
 from django.forms.widgets import Select
-from typing_extensions import TypedDict
 
 from flexible_forms.utils import stable_json
-
-AutocompleteResult = TypedDict("AutocompleteResult", {"id": str, "text": str})
-AutocompleteValue = Union[AutocompleteResult, Sequence[AutocompleteResult]]
 
 
 class AutocompleteSelect(Select):

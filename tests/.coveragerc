@@ -1,2 +1,6 @@
 [run]
+# The module-not-measured warning is disabled because of the way that
+# pytest-xdist loads modules for testing. It seems that some xdist workers load
+# the module being tested before the coverage plugin. This doesn't seem to
+# affect measurement, however.
 disable_warnings = module-not-measured

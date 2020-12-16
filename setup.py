@@ -24,8 +24,7 @@ setup(
     package_dir={"": "."},
     package_data={},
     install_requires=[
-        'django>=2.2',
-        'importlib-metadata==1.*,>=1.7.0; python_version < "3.8"',
+        'django>=2.2', 'importlib-metadata; python_version < "3.8"',
         'jmespath==0.*,>=0.10.0', 'requests==2.*,>=2.24.0',
         'simpleeval==0.*,>=0.9.10'
     ],

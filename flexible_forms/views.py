@@ -5,7 +5,7 @@ from django.apps import apps
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import get_object_or_404
 
-from flexible_forms.fields import AutocompleteSelectField
+from flexible_forms.fields import URLAutocompleteSelectField
 from flexible_forms.models import BaseField
 
 
@@ -26,13 +26,9 @@ def autocomplete(
     # Retrieve the Field.
     field_model = cast(Type[BaseField], apps.get_model(app_label, model_name))
     field = get_object_or_404(field_model, pk=field_pk)
-    field_type = cast(AutocompleteSelectField, field.as_field_type())
+    field_type = cast(URLAutocompleteSelectField, field.as_field_type())
 
-    search_results, has_more = field_type.autocomplete(
-        request=request,
-        field=field,
-        **field.form_widget_options,
-    )
+    search_results, has_more = field_type.autocomplete(request=request, field=field)
 
     # Perform the search and return a Select2-compatible response.
     return JsonResponse(
