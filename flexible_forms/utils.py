@@ -173,7 +173,7 @@ def jp(expr: str, data: Any, default: Any = None) -> Any:
     return default if result is None else result
 
 
-@lru_cache
+@lru_cache(max_size=128)
 def get_expression_fields(jmespath_expression: str) -> Tuple[str, ...]:
     """Return a list of fields referenced in the given JMESPath expression.
 
