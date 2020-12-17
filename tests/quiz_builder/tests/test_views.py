@@ -691,7 +691,7 @@ def test_autocomplete_queryset_search_fallback(rf: RequestFactory, mocker) -> No
     )
 
     results = _get_autocomplete_results(
-        rf, question_field, page=1, per_page=5, term="user 2 2 user2@example.com"
+        rf, question_field, page=1, per_page=5, term="user 2"
     )
 
     assert results == expected_results

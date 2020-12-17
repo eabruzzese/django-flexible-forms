@@ -5,6 +5,8 @@
 import json
 import logging
 import urllib.parse as urlparse
+from functools import reduce
+from operator import add, ior
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -16,22 +18,25 @@ from typing import (
     Set,
     Tuple,
     Type,
-    Union,
     cast,
 )
 
 import requests
 import simpleeval
 from django.apps import apps
-from django.contrib.postgres.search import SearchQuery, SearchVector
+from django.contrib.postgres.search import (
+    SearchQuery,
+    SearchRank,
+    TrigramSimilarity,
+)
+from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
 from django.core.paginator import Paginator
 from django.db import connections
-from django.db.models import FileField, ImageField
+from django.db.models import Case, F, FileField, ImageField
 from django.db.models import Model as DjangoModel
-from django.db.models import Value
+from django.db.models import Sum, When
 from django.db.models import fields as model_fields
-from django.db.models.functions import Cast, Concat
 from django.db.models.query import QuerySet
 from django.forms import fields as form_fields
 from django.forms import widgets as form_widgets
@@ -55,6 +60,7 @@ except ImportError:  # pragma: no cover
 
 from flexible_forms.utils import (
     RenderedString,
+    check_supports_pg_trgm,
     evaluate_expression,
     get_expression_fields,
     interpolate,
@@ -1208,9 +1214,78 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
         Returns:
             QuerySet[DjangoModel]: The filtered QuerySet.
         """
-        return queryset.annotate(_search=SearchVector(*search_fields)).filter(
-            _search=SearchQuery(search_term)
+        # Check for trigram support (the pg_trgm PostgreSQL extension).
+        db_connection = connections[queryset.db]
+        supports_pg_trgm = cache.get_or_set(
+            f"flexible_forms:{db_connection}:supports_pg_trgm",
+            lambda: check_supports_pg_trgm(db_connection),
         )
+
+        # Annotate the queryset with search scores.
+        search_rank_fields: Set[F] = set()
+        for field_name in search_fields:
+            strict_score_field = F(f"_{field_name}_strict_score")
+            similarity_score_field = F(f"_{field_name}_similarity_score")
+            search_rank_fields.update([strict_score_field, similarity_score_field])
+
+            # Annotate the queryset with "strict" and "similarity" scores for
+            # each field.
+            #
+            # The "strict" score is how well the search term matches the field
+            # value with simple comparisons (iexact, istartswith, and
+            # icontains).
+            #
+            # The "similarity" score uses PostgreSQL full-text search
+            # capabilities (trigram similarity if available, otherwise tsvector
+            # rankings with prefix search).
+            queryset = queryset.annotate(
+                **{
+                    strict_score_field.name: Case(
+                        When(**{f"{field_name}__iexact": search_term, "then": 3}),
+                        When(**{f"{field_name}__istartswith": search_term, "then": 2}),
+                        When(**{f"{field_name}__icontains": search_term, "then": 1}),
+                        output_field=model_fields.IntegerField(),
+                        default=0,
+                    ),
+                    # Annotate the queryset with a similarity score in addition
+                    # to the strict matching.
+                    similarity_score_field.name: (
+                        # Use trigram similarity (pg_trgm) if it's supported.
+                        TrigramSimilarity(field_name, search_term)
+                        if supports_pg_trgm
+                        else
+                        # Use SearchRank (to_tsvector) as a fallback.
+                        SearchRank(
+                            vector=field_name,
+                            # Split the search term into words, append a prefix
+                            # operator to each one, and IOR them together for
+                            # a sort of pseudo-lexeme search ranking.
+                            query=reduce(
+                                ior,
+                                (
+                                    SearchQuery(f"{word}:*", search_type="raw")
+                                    for word in search_term.split(" ")
+                                    if word
+                                ),
+                            ),
+                        )
+                    ),
+                }
+            )
+
+        # Sum up all of the score fields into a single search rank.
+        search_rank = Sum(
+            reduce(add, search_rank_fields), output_field=model_fields.FloatField()
+        )
+
+        # Sum up all of the search scores into an aggregated search rank.
+        queryset = queryset.annotate(_search_rank=search_rank)
+        # Filter out any results that are total non-matches.
+        queryset = queryset.filter(_search_rank__gt=0.0)
+        # Order the results by the search rank, highest first.
+        queryset = queryset.order_by(f"-_search_rank")
+
+        return queryset
 
     @classmethod
     def _search_fallback(
@@ -1229,33 +1304,39 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
         Returns:
             QuerySet[DjangoModel]: The filtered QuerySet.
         """
-        search_field = search_fields[0]
+        # Annotate the queryset with search scores.
+        search_rank_fields: Set[F] = set()
+        for field_name in search_fields:
+            strict_score_field = F(f"_{field_name}_strict_score")
+            search_rank_fields.add(strict_score_field)
 
-        # If there are multiple search_fields, concatenate their values and
-        # search the resulting text blob.
-        if len(search_fields) > 1:
-            # Create a tuple containing each of the search_fields (cast to
-            # TextField values), joined by spaces.
-            search_domain_fields: Tuple[Union[Cast, Value], ...] = ()
-            for field_name in search_fields:
-                search_domain_fields = (
-                    *search_domain_fields,
-                    Cast(field_name, output_field=model_fields.TextField()),
-                    Value(" "),
-                )
-
-            # Annotate the queryset with a _search attribute containing a
-            # space-separated list of field values.
+            # Annotate the queryset with a search score based on how well the
+            # field value matches the search term.
             queryset = queryset.annotate(
-                _search=Concat(
-                    *search_domain_fields, output_field=model_fields.TextField()
-                )
+                **{
+                    strict_score_field.name: Case(
+                        When(**{f"{field_name}__iexact": search_term, "then": 3}),
+                        When(**{f"{field_name}__istartswith": search_term, "then": 2}),
+                        When(**{f"{field_name}__icontains": search_term, "then": 1}),
+                        output_field=model_fields.IntegerField(),
+                        default=0,
+                    ),
+                }
             )
 
-            # Instruct the queryset to search the concatenated field.
-            search_field = "_search"
+        # Sum up all of the score fields into a single search rank.
+        search_rank = Sum(
+            reduce(add, search_rank_fields), output_field=model_fields.FloatField()
+        )
 
-        return queryset.filter(**{f"{search_field}__icontains": search_term})
+        # Sum up all of the search scores into an aggregated search rank.
+        queryset = queryset.annotate(_search_rank=search_rank)
+        # Filter out any results that are total non-matches.
+        queryset = queryset.filter(_search_rank__gt=0)
+        # Order the results by the search rank, highest first.
+        queryset = queryset.order_by(f"-_search_rank")
+
+        return queryset
 
 
 class QuerysetAutocompleteSelectMultipleField(QuerysetAutocompleteSelectField):

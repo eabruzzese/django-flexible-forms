@@ -19,6 +19,8 @@ from typing import (
 )
 
 import jmespath
+from django.db import DatabaseError
+from django.db.backends.base.base import BaseDatabaseWrapper
 from django.template import Context, Template
 from django.template.base import VariableNode
 from jmespath.parser import Parser
@@ -173,7 +175,7 @@ def jp(expr: str, data: Any, default: Any = None) -> Any:
     return default if result is None else result
 
 
-@lru_cache(max_size=128)
+@lru_cache(128)
 def get_expression_fields(jmespath_expression: str) -> Tuple[str, ...]:
     """Return a list of fields referenced in the given JMESPath expression.
 
@@ -301,3 +303,31 @@ def _interpolate_list(data: list, context: Dict[str, Any]) -> list:
         list: The interpolated list.
     """
     return [interpolate(v, context) for v in data]
+
+
+# Determine if the database support trigram similarity by checking for
+# the pg_trgm extension.
+def check_supports_pg_trgm(connection: BaseDatabaseWrapper) -> bool:
+    """Determine if trigram similarity support is present.
+
+    Attempts to run a query against the extensions table in PostgreSQL to
+    look for the pg_trgm extension. Failures assume a lack of support.
+
+    Args:
+        connection: The database connection.
+
+    Returns:
+        bool: True if trigram support is present.
+    """
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT 1
+                FROM pg_extension
+                WHERE extname = 'pg_trgm' LIMIT 1;
+            """
+            )
+            return bool(cursor.fetchone())
+    except DatabaseError:
+        return False
