@@ -775,7 +775,7 @@ class BaseAutocompleteSelectField(FieldType):
         page = int(request.GET.get("page", "1"))
         per_page = int(request.GET.get("per_page", "50"))
 
-        record = cast(BaseRecord, self.record)
+        record = cast("BaseRecord", self.record)
         record_variable = (
             (record._meta.verbose_name or "record").lower().replace(" ", "_")
         )
