@@ -535,49 +535,6 @@ def test_noop_modifier_attribute() -> None:
 
 
 @pytest.mark.django_db
-def test_disabled_validation() -> None:
-    """Ensure that validation can be skipped when saving a record form.
-
-    In some scenarios it's useful to be able to save a record in an
-    invalid state (e.g., storing form inputs to be modified later).
-    Passing validate=False to form.save() will trigger this behavior.
-    """
-    form = FormFactory()
-
-    # Generate a field of every type and make them required.
-    AppField.objects.bulk_create(
-        FieldFactory.build(
-            form=form,
-            name=f"{field_type}_field",
-            field_type=field_type,
-            required=True,
-            _order=0,
-        )
-        for field_type in FIELD_TYPES.keys()
-    )
-
-    # Create a Django form from our form definition.
-    django_form = form.as_django_form(data={})
-
-    # The form should not be valid because we haven't entered any data yet.
-    assert not django_form.is_valid()
-
-    # Attempting to save the form normally will raise a ValidationError.
-    with pytest.raises(ValueError):
-        django_form.save()
-
-    # Passing validate=False should allow the record to be saved.
-    record = django_form.save(validate=False)
-
-    # Trying to save a record containing completely invalid data for a field
-    # should make a best effort to save as many attributes as possible.
-    record.SingleLineTextField_field = "some different text"
-    record.DateTimeField_field = "not a datetime"
-    with pytest.raises(ValidationError):
-        record.save()
-
-
-@pytest.mark.django_db
 def test_record_queries(django_assert_num_queries) -> None:
     """Ensure that a minimal number of queries is required to fetch records."""
     forms_count = 3

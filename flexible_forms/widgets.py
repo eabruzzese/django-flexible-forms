@@ -11,6 +11,7 @@ from typing import (
     Sequence,
     Tuple,
     Union,
+    cast,
 )
 
 from django.contrib.admin.widgets import AutocompleteMixin
@@ -43,7 +44,7 @@ class AutocompleteSelect(Select):
         self.placeholder = placeholder or ""
 
     def optgroups(
-        self, name: str, value: List[str], *args: Any, **kwargs: Any
+        self, name: str, value: str, attrs: Optional[Dict[Any, Any]] = None
     ) -> List[Tuple[None, List[Dict[str, Any]], int]]:
         """Build a list of optgroups for populating the select.
 
@@ -55,6 +56,8 @@ class AutocompleteSelect(Select):
         representation of the originally-selected result from the
         autocomplete API call.
 
+        TODO: This method needs its types fixed.
+
         Args:
             name: The name of the widget in the form.
             value: The value of the field.
@@ -65,21 +68,29 @@ class AutocompleteSelect(Select):
             List[Tuple[Optional[str], List[Tuple[Any, Any]], int]]: Optgroups
                 for the widget.
         """
+        # Parse the given value as a JSON string, and make it a list if it
+        # isn't already so that we can iterate over it when we enumerate
+        # selected options.
+        value = json.loads(value)
+        if not isinstance(value, list):
+            value = [value]
+        value: List[Dict[str, Any]] = cast(List[Dict[str, Any]], value)
+
         default: Tuple[None, List[Dict[str, Any]], int] = (None, [], 0)
         groups = [default]
         has_selected = False
 
         selected_choices = {
-            str(v) for v in value if not self._choice_has_empty_value((str(v), ""))
+            stable_json(v)
+            for v in value
+            if not self._choice_has_empty_value((stable_json(v), ""))
         }
 
         if not self.is_required and not self.allow_multiple_selected:
             default[1].append(self.create_option(name, "", "", False, 0))
 
         choices = [
-            (str(v), json.loads(v)["text"])
-            for v in value
-            if v not in (None, "", "null")
+            (stable_json(v), v["text"]) for v in value if v not in (None, "", "null")
         ]
 
         for option_value, option_label in choices:
@@ -132,7 +143,7 @@ class AutocompleteSelect(Select):
 
     def value_from_datadict(
         self, data: Dict[str, Any], files: Mapping[str, Iterable[Any]], name: str
-    ) -> List[str]:
+    ) -> str:
         """Extract the widget's value from the given data.
 
         Handles the case where multiple values are selected.
@@ -148,9 +159,9 @@ class AutocompleteSelect(Select):
         value = super().value_from_datadict(data, files, name)
 
         if value is None:
-            return []
+            value = []
 
-        if not self.allow_multiple_selected:
+        if not isinstance(value, list):
             value = [value]
 
         parsed_value: List[str] = []
@@ -167,27 +178,26 @@ class AutocompleteSelect(Select):
 
             parsed_value.append(parsed_v)
 
-        return parsed_value
+        # If only one value is expected, unwrap it from the parsed list.
+        final_value = (
+            next(iter(cast(Iterable, parsed_value)), None)
+            if not self.allow_multiple_selected
+            else parsed_value
+        )
+
+        return json.dumps(final_value)
 
     def format_value(self, value: Any) -> Any:
-        """Format a value for rendering.
-
-        Assumes the value is a list of JSON strings. If parsing fails,
-        returns the value as-is.
+        """Format a value for rendering in a widget template.
 
         Args:
             value: The value to format.
 
         Returns:
-            Any: The formatted value, if formatting was successful.
+            Any: The formatted value, if formatting was successful. Otherwise
+                returns the value unmodified.
         """
-        if value in self.EMPTY_VALUES:
-            return []
-
-        try:
-            return [stable_json(v) for v in json.loads(value)]
-        except (json.JSONDecodeError, TypeError):
-            return value
+        return str([] if value in self.EMPTY_VALUES else value)
 
     @staticmethod
     def _choice_has_empty_value(choice: Tuple[Any, str]) -> bool:

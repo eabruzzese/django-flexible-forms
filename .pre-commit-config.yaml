@@ -23,7 +23,7 @@ repos:
         exclude: >
           (?x)^(
             tests/manage\.py|
-            tests/test_project/*|
+            tests/test_project/.*|
             tests/test_app/[^\/]+.py|
             tests/test_app/tests/factories\.py|
             tests/test_app/management/[^\/]+.py|

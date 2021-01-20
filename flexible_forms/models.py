@@ -546,8 +546,8 @@ class BaseForm(FlexibleBaseModel):
 
     def as_django_form(
         self,
-        data: Optional[Mapping[str, Any]] = None,
-        files: Optional[Mapping[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+        files: Optional[Dict[str, Any]] = None,
         instance: Optional["BaseRecord"] = None,
         initial: Optional[Mapping[str, Any]] = None,
         **kwargs: Any,
@@ -727,18 +727,28 @@ class BaseField(FlexibleBaseModel):
 
         super().save(*args, **kwargs)
 
-    def as_field_type(self) -> Type[FieldType]:
+    def as_field_type(
+        self,
+        record: Optional["BaseRecord"] = None,
+        field_values: Optional[Dict[str, Any]] = None,
+    ) -> FieldType:
         """Return the flexible FieldType for the field.
 
         Returns:
             FieldType: The FieldType class for the field.
         """
-        return FIELD_TYPES[self.field_type]
+        return FIELD_TYPES[self.field_type](
+            field=self,
+            record=record,
+            field_values=field_values,
+            modifiers=tuple((m.attribute, m.expression) for m in self.modifiers.all()),
+            **self.field_type_options,
+        )
 
     def as_form_field(
         self,
-        field_values: Dict[str, Any],
         record: Optional["BaseRecord"] = None,
+        field_values: Optional[Dict[str, Any]] = None,
     ) -> forms.Field:
         """Return a Django form Field instance.
 
@@ -750,22 +760,15 @@ class BaseField(FlexibleBaseModel):
         Returns:
             forms.Field: The configured Django form Field instance.
         """
-        return self.as_field_type().as_form_field(
-            field=self,
-            field_values=field_values,
-            record=record,
-            modifiers=tuple((m.attribute, m.expression) for m in self.modifiers.all()),
-            # Django form field arguments.
-            required=self.required,
-            label=self.label,
-            label_suffix=self.label_suffix,
-            initial=self.initial,
-            help_text=self.help_text,
-            widget=self.as_form_widget(record=record),
-            **self.form_field_options,
-        )
+        return self.as_field_type(
+            record=record, field_values=field_values
+        ).as_form_field()
 
-    def as_form_widget(self, record: Optional["BaseRecord"] = None) -> Widget:
+    def as_form_widget(
+        self,
+        record: Optional["BaseRecord"] = None,
+        field_values: Optional[Dict[str, Any]] = None,
+    ) -> Widget:
         """Return a Django form Widget instance.
 
         Uses the form_widget_options and the given field_values to customize
@@ -778,9 +781,9 @@ class BaseField(FlexibleBaseModel):
         Returns:
             Widget: The configured Django form Widget instance.
         """
-        return self.as_field_type().as_form_widget(
-            field=self, record=record, **self.form_widget_options
-        )
+        return self.as_field_type(
+            record=record, field_values=field_values
+        ).as_form_widget()
 
     def as_model_field(self) -> models.Field:
         """Return a Django model Field definition.
@@ -788,12 +791,7 @@ class BaseField(FlexibleBaseModel):
         Returns:
             models.Field: The configured Django model Field instance.
         """
-        return self.as_field_type().as_model_field(
-            null=not self.required,
-            blank=not self.required,
-            default=self.initial,
-            help_text=self.help_text,
-        )
+        return self.as_field_type().as_model_field()
 
 
 class BaseFieldModifier(FlexibleBaseModel):
@@ -1119,7 +1117,7 @@ class BaseRecord(FlexibleBaseModel):
         record_type = (
             self.form.label
             if self.__dict__.get("form")
-            or self._meta.get_field("form").get_cached_value(self)
+            or self._meta.get_field("form").get_cached_value(self, default=None)
             else cast(str, self._meta.verbose_name).title()
         )
 

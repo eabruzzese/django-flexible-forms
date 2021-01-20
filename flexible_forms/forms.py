@@ -8,6 +8,7 @@ from django import forms
 from django.core.files.base import File
 from django.forms.widgets import HiddenInput
 
+from flexible_forms.cache import cache
 from flexible_forms.models import BaseForm, BaseRecord
 from flexible_forms.signals import (
     post_form_clean,
@@ -32,13 +33,18 @@ class BaseRecordForm(forms.ModelForm):
 
     def __init__(
         self,
-        data: Optional[Mapping[str, Any]] = None,
-        files: Optional[Mapping[str, File]] = None,
+        data: Optional[Dict[str, Any]] = None,
+        files: Optional[Dict[str, File]] = None,
         instance: Optional["BaseRecord"] = None,
         initial: Optional[Mapping[str, Any]] = None,
         **kwargs: Any,
     ) -> None:
         opts = self._meta  # type: ignore
+
+        # Ensure that data and files are both mutable so that signal handlers
+        # can act before the form is initialized.
+        data = data.copy() if data is not None else None
+        files = files.copy() if files is not None else None
 
         # Extract the form definition from the given data, the instance, or the
         # initial values.
@@ -89,7 +95,7 @@ class BaseRecordForm(forms.ModelForm):
         # Emit a signal after initializing the form.
         post_form_init.send(
             sender=self.__class__,
-            django_form=self,
+            form=self,
         )
 
     def full_clean(self) -> None:
@@ -100,6 +106,30 @@ class BaseRecordForm(forms.ModelForm):
         pre_form_clean.send(sender=self.__class__, form=self)
         clean_result = super().full_clean()
         post_form_clean.send(sender=self.__class__, form=self)
+
+        record_pk = self.instance.pk
+        record_opts = self.instance._meta
+        app_label, model_name = record_opts.app_label, record_opts.model_name
+
+        field_values = {
+            **{
+                name: field.widget.value_from_datadict(
+                    self.data, self.files, self.add_prefix(name)
+                )
+                for name, field in self.fields.items()
+            },
+            **getattr(self, "cleaned_data", {}),
+        }
+
+        for key, value in field_values.items():
+            if isinstance(value, File):
+                field_values[key] = value.name
+
+        cache.set(
+            f"flexible_forms:field_values:{app_label}:{model_name}:{record_pk}",
+            field_values,
+            timeout=None,
+        )
 
         return clean_result
 
@@ -127,7 +157,7 @@ class BaseRecordForm(forms.ModelForm):
 
         return cleaned_data
 
-    def save(self, commit: bool = True, validate: bool = True) -> "BaseRecord":
+    def save(self, commit: bool = True) -> "BaseRecord":
         """Save the form data to a Record.
 
         Maps the cleaned form data into the Record's _data field.
@@ -146,10 +176,7 @@ class BaseRecordForm(forms.ModelForm):
         for field_name in self.changed_data:
             setattr(self.instance, field_name, self.cleaned_data[field_name])
 
-        if commit and not validate:
-            self.instance.save()
-        else:
-            super().save(commit=commit)
+        super().save(commit=commit)
 
         post_form_save.send(sender=self.__class__, form=self)
 

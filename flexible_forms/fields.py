@@ -20,6 +20,7 @@ from typing import (
     Type,
     cast,
 )
+from urllib.parse import urlencode
 
 import requests
 import simpleeval
@@ -41,7 +42,6 @@ from django.db.models.query import QuerySet
 from django.forms import fields as form_fields
 from django.forms import widgets as form_widgets
 from django.http import HttpRequest, QueryDict
-from django.shortcuts import get_object_or_404
 from django.urls import Resolver404, resolve, reverse
 from django.utils.functional import cached_property
 from typing_extensions import TypedDict
@@ -221,83 +221,87 @@ class FieldType(metaclass=FieldTypeMetaclass):
     #
     model_field_options: Dict[str, Any] = {}
 
-    @classmethod
-    def as_form_field(
-        cls,
-        *,
+    def __init__(
+        self,
         field: "BaseField",
-        field_values: Dict[str, Optional[Any]],
-        record: Optional["BaseRecord"] = None,
+        record: Optional["BaseRecord"],
+        field_values: Optional[Dict[str, Any]] = None,
         modifiers: Sequence[Tuple[str, str]] = (),
-        **form_field_options: Any,
-    ) -> form_fields.Field:
+        **field_type_options: Any,
+    ):
+        self.field = field
+        self.record = record
+        self.field_values = field_values or {}
+        self.modifiers = modifiers
+
+        for attr, value in field_type_options.items():
+            setattr(self, attr, value)
+
+    def as_form_field(self, **form_field_options: Any) -> form_fields.Field:
         """Return an instance of the field for use in a Django form.
 
         Passes additional kwargs to the form field constructor.
 
         Args:
-            field: The Field model instance.
-            record: The record instance to which the form is bound, if
-                available.
-            modifiers: A sequence of modifiers to be applied to the field.
-            field_values: A mapping of the current form values.
-            form_field_options: Passed to the form field constructor.
+            form_field_options: Additional kwargs passed to the Django form
+                field constructor.
 
         Returns:
             form_fields.Field: An instance of the form field.
         """
+        # Cascade form field options in precedence order:
+        #
+        #   * Defaults for the field type.
+        #   * Common attributes from the BaseField record.
+        #   * Additional options (form_field_options) from the BaseField record.
+        #   * Any form_field_options passed to the method directly.
+        #
+        form_field_options = {
+            **self.form_field_options,
+            "required": self.field.required,
+            "label": self.field.label,
+            "label_suffix": self.field.label_suffix,
+            "initial": self.field.initial,
+            "help_text": self.field.help_text,
+            **self.field.form_field_options,
+            **form_field_options,
+        }
+
         # If no widget was given explicitly, build a default one.
         form_field_options["widget"] = form_field_options.get(
-            "widget", cls.as_form_widget(field=field, record=record)
+            "widget", self.as_form_widget()
         )
 
         # Generate the form field with its appropriate class and widget.
-        form_field = cls.form_field_class(
-            **{
-                **cls.form_field_options,
-                **form_field_options,
-            },
-        )
+        form_field = self.form_field_class(**form_field_options)
 
-        # Apply any modifiers to the field.
-        form_field = cls.apply_modifiers(
-            form_field,
-            field=field,
-            record=record,
-            modifiers=modifiers,
-            field_values=field_values,
-        )
+        # Apply any configured modifiers to the field.
+        form_field = self.apply_modifiers(form_field)
 
         return form_field
 
-    @classmethod
-    def as_form_widget(
-        cls,
-        *,
-        field: "BaseField",
-        record: Optional["BaseRecord"] = None,
-        **form_widget_options: Any,
-    ) -> form_widgets.Widget:
+    def as_form_widget(self, **form_widget_options: Any) -> form_widgets.Widget:
         """Return an instance of the form widget for rendering.
 
         Passes additional kwargs to the form widget constructor.
 
         Args:
-            field: The Field model instance.
-            record: The record instance to which the form is bound, if
-                available.
-            form_widget_options: Passed through to the form widget constructor.
+            form_widget_options: Additional kwargs passed to the Django form
+                widget constructor.
 
         Returns:
             form_widgets.Widget: The configured form widget for the field.
         """
-        widget_cls = cls.form_widget_class or cast(
-            Type[form_widgets.Widget], cls.form_field_class.widget
+        # If no form_widget_class is configured for the field type, use the
+        # default one for the form_field_class.
+        widget_cls = self.form_widget_class or cast(
+            Type[form_widgets.Widget], self.form_field_class.widget
         )
 
         return widget_cls(
             **{
-                **cls.form_widget_options,
+                **self.form_widget_options,
+                **self.field.form_widget_options,
                 **form_widget_options,
             }
         )
@@ -308,9 +312,14 @@ class FieldType(metaclass=FieldTypeMetaclass):
 
         Receives a dict of kwargs to pass through to the model field constructor.
 
+        Since this method generates a model field (which should only ever be
+        used when defining model classes, and should never have dynamic
+        attributes), it is a classmethod and does not have access to a field,
+        record, or field values.
+
         Args:
-            model_field_options: A dict of kwargs to be passed to the
-                constructor of the `model_field_class`.
+            model_field_options: A dict of kwargs to be passed to the Django
+                model field constructor.
 
         Returns:
             model_fields.Field: An instance of the model field.
@@ -322,38 +331,26 @@ class FieldType(metaclass=FieldTypeMetaclass):
             }
         )
 
-    @classmethod
-    def apply_modifiers(
-        cls,
-        form_field: form_fields.Field,
-        *,
-        field: "BaseField",
-        field_values: Dict[str, Any],
-        record: Optional["BaseRecord"] = None,
-        modifiers: Sequence[Tuple[str, str]] = (),
-    ) -> form_fields.Field:
+    def apply_modifiers(self, form_field: form_fields.Field) -> form_fields.Field:
         """Apply the given modifiers to the given Django form field.
 
         Args:
-            form_field: The form field to be modified.
-            field: The BaseField instance.
-            field_values: The current values of all fields on the form.
-            record: The BaseRecord instance, if available.
-            modifiers: A sequence of tuples
-                in the form of (attribute, expression) tuples to apply to the
-                field.
+            form_field: The form field to which to apply modifiers.
 
         Returns:
-            form_fields.Field: The given form field, modified using the modifiers.
+            form_fields.Field: The given form field, modified using the
+                configured modifiers.
         """
-        for attribute, expression in modifiers:
-            expression_context = field_values
+        for attribute, expression in self.modifiers:
+            expression_context = self.field_values
 
-            if record:
+            if self.record:
                 record_variable = (
-                    (record._meta.verbose_name or "record").lower().replace(" ", "_")
+                    (self.record._meta.verbose_name or "record")
+                    .lower()
+                    .replace(" ", "_")
                 )
-                expression_context = {record_variable: record, **field_values}
+                expression_context = {record_variable: self.record, **self.field_values}
 
             # Evaluate the expression and set the attribute specified by
             # `self.attribute` to the value it returns.
@@ -366,14 +363,10 @@ class FieldType(metaclass=FieldTypeMetaclass):
 
             # If the caller has implemented a custom apply_ATTRIBUTENAME method
             # to handle application of the attribute, use it.
-            custom_applicator = getattr(cls, f"apply_{attribute}", None)
+            custom_applicator = getattr(self, f"apply_{attribute}", None)
             if custom_applicator:
                 form_field = custom_applicator(
-                    form_field,
-                    field=field,
-                    record=record,
-                    field_values=field_values,
-                    **{attribute: expression_value},
+                    form_field, **{attribute: expression_value}
                 )
 
             # If no custom applicator method is implemented, but the form field
@@ -395,19 +388,18 @@ class FieldType(metaclass=FieldTypeMetaclass):
 
         return form_field
 
-    @classmethod
     def apply_hidden(
-        cls,
+        self,
         form_field: form_fields.Field,
-        *,
-        hidden: bool = False,
+        hidden: bool,
         **kwargs: Any,
     ) -> form_fields.Field:
         """Apply the "hidden" attribute.
 
         If a field modifier specifies that the field should be "hidden", its
         widget is changed to a HiddenInput, and its "required" attribute is
-        set to False.
+        set to False (to avoid validation errors with fields that can't be
+        seen).
 
         Args:
             form_field: The form field that should be hidden.
@@ -706,20 +698,15 @@ class BaseAutocompleteSelectField(FieldType):
     form_widget_class = AutocompleteSelect
     model_field_class = JSONField
 
-    DEFAULT_RESULT_MAPPING: AutocompleteResultMapping = {
+    # Autocomplete-specific field_type_options.
+    DEFAULT_MAPPING: AutocompleteResultMapping = {
         "root": "@",
         "value": "id",
         "text": "text",
         "extra": {},
     }
 
-    @classmethod
-    def as_form_widget(
-        cls,
-        field: "BaseField",
-        record: Optional["BaseRecord"] = None,
-        **form_widget_options: Any,
-    ) -> form_widgets.Widget:
+    def as_form_widget(self, **form_widget_options: Any) -> form_widgets.Widget:
         """Build the autocomplete form widget.
 
         Replaces the url parameter with a proxy URL to a custom view to allow
@@ -736,117 +723,92 @@ class BaseAutocompleteSelectField(FieldType):
             form_widgets.Widget: A configured widget for rendering the
                 autocomplete input.
         """
-        proxy_url = reverse(
-            "flexible_forms:autocomplete",
-            kwargs={
-                "app_label": field._meta.app_label,
-                "model_name": field._meta.model_name,
-                "field_pk": field.pk,
-            },
+        proxy_url = urlparse.urlparse(
+            reverse(
+                "flexible_forms:autocomplete",
+                kwargs={
+                    "app_label": self.field._meta.app_label,
+                    "model_name": self.field._meta.model_name,
+                    "field_pk": self.field.pk,
+                },
+            )
         )
+
+        # Parse the query string so we can manipulate it.
+        query_params = dict(urlparse.parse_qsl(proxy_url.query))
 
         # If a specific record instance was supplied, append its ID to the URL
         # so that autocomplete suggestions can be tailored to a particular
         # record's field values.
-        proxy_url = f"{proxy_url}?record_pk={record.pk}" if record else proxy_url
+        if self.record and self.record.pk:
+            query_params["record_pk"] = self.record.pk
+
+        # Re-encode the querystring and replace the original one.
+        proxy_url = proxy_url._replace(query=urlencode(query_params))
 
         return super().as_form_widget(
-            field=field,
-            record=record,
             **{
                 **form_widget_options,
-                "url": proxy_url,
+                "url": urlparse.urlunparse(proxy_url),
             },
         )
 
-    @classmethod
     def autocomplete(
-        cls,
-        request: HttpRequest,
-        field: "BaseField",
+        self, request: HttpRequest
     ) -> Tuple[Iterable[AutocompleteResult], bool]:
         """Return paginated search results for the given search_term.
 
         Returns an iterable of AutocompleteSearchResult objects and a boolean
         indicating whether there are more to be fetched via pagination.
 
-        This method is responsible for extracting GET parameters from the
-        request, fetching the appropriate record instance (if needed),
-        interpolating any templated values in the field's form_field_options
-        dict, and finally passing the results of those operations to the
-        field type's get_results() method to perform the actual search.
-
         Args:
             request: The HTTP request.
-            field: The Field record instance that uses this autocomplete.
 
         Returns:
             Tuple[Sequence[AutocompleteResult], bool]: A two-tuple containing
                 a sequence of zero or more select2-compatible search results, and
                 a boolean indicating whether or not there are more results to
-                fetch.
+                fetch with pagination.
         """
         # Extract GET parameters common to all autocomplete fields.
         search_term = request.GET.get("term", "")
-        record_pk = request.GET.get("record_pk")
         page = int(request.GET.get("page", "1"))
         per_page = int(request.GET.get("per_page", "50"))
 
-        # Build the context for rendering the data.
-        from flexible_forms.models import BaseRecord
-
-        # If autocompletion was requested for a specific record, fetch it using
-        # the given primary key. If not, use a blank record.
-        record_model = field.flexible_forms.get_model(BaseRecord)
-        record_alias = (
-            (record_model._meta.verbose_name or "record").lower().replace(" ", "_")
-        )
-        record = (
-            get_object_or_404(record_model, pk=record_pk)
-            if record_pk is not None
-            else record_model(form=field.form)
+        record = cast(BaseRecord, self.record)
+        record_variable = (
+            (record._meta.verbose_name or "record").lower().replace(" ", "_")
         )
 
         render_context = {
-            "search_term": search_term,
+            "term": search_term,
             "page": page,
             "per_page": per_page,
             "record": record,
-            record_alias: record,
-            **request.GET.dict(),
+            record_variable: record,
+            **record._data,
+            **self.field_values,
         }
 
         # Iterpolate the form_field_options using context from the current request.
         field_type_options = interpolate(
-            field.field_type_options, context=render_context
+            self.field.field_type_options, context=render_context
         )
 
-        return cls.get_results(
+        return self.get_results(
             request,
-            field,
             search_term=search_term,
             page=page,
             per_page=per_page,
-            record=(record if record.pk else None),
-            **{
-                # The record is also made available by a slugified version of
-                # the record model's verbose_name for an improved developer
-                # experience.
-                record_alias: (record if record.pk else None),
-                # Rendered form field options are also passed.
-                **field_type_options,
-            },
+            **field_type_options,
         )
 
-    @classmethod
     def get_results(
-        cls,
+        self,
         request: HttpRequest,
-        field: "BaseField",
         search_term: str,
         page: int,
         per_page: int,
-        record: Optional["BaseRecord"],
         **field_type_options: Any,
     ) -> Tuple[Iterable[AutocompleteResult], bool]:
         """Perform a search and return paginated results.
@@ -857,16 +819,14 @@ class BaseAutocompleteSelectField(FieldType):
 
         Args:
             request: The HTTP request.
-            field: The BaseField instance.
             search_term: The term to search for.
             page: The pagination page number.
             per_page: The pagination page size.
-            record: The record instance.
             field_type_options: The field's field_type_options after having
                 its values interpolated.
 
         Raises:
-            NotImplementedError: If the implementing class doesn't impement
+            NotImplementedError: If the implementing class doesn't implement
                 a get_results() method.
         """
         raise NotImplementedError(  # pragma: no cover
@@ -879,15 +839,15 @@ class URLAutocompleteSelectField(BaseAutocompleteSelectField):
 
     label = "Autocomplete (URL)"
 
-    @classmethod
+    # URL autocomplete-specific field type options.
+    url: str
+
     def get_results(
-        cls,
+        self,
         request: HttpRequest,
-        field: "BaseField",
         search_term: str,
         page: int,
         per_page: int,
-        record: Optional["BaseRecord"],
         **field_type_options: Any,
     ) -> Tuple[Iterable[AutocompleteResult], bool]:
         """Perform a search and return paginated results.
@@ -901,11 +861,9 @@ class URLAutocompleteSelectField(BaseAutocompleteSelectField):
 
         Args:
             request: The HTTP request.
-            field: The BaseField instance.
             search_term: The term to search for.
             page: The pagination page number.
             per_page: The pagination page size.
-            record: The record instance.
             field_type_options: The field's field_type_options after having
                 its values interpolated.
 
@@ -921,7 +879,7 @@ class URLAutocompleteSelectField(BaseAutocompleteSelectField):
 
         if not url:
             logger.warning(
-                f"The URL for field '{field}' was blank, and so no "
+                f"The URL for field '{self.field}' was blank, and so no "
                 f"autocomplete search could take place. This may be a "
                 f"misconfiguration."
             )
@@ -929,12 +887,12 @@ class URLAutocompleteSelectField(BaseAutocompleteSelectField):
 
         mapping = cast(
             AutocompleteResultMapping,
-            {**cls.DEFAULT_RESULT_MAPPING, **field_type_options.get("mapping", {})},
+            {**self.DEFAULT_MAPPING, **field_type_options.get("mapping", {})},
         )
         search_manually: bool = "term" not in url.render_context
 
         # Get the JSON response from the endpoint.
-        response_json = cls._get_json_response(request, url)
+        response_json = self._get_json_response(request, url)
 
         # Parse the search response and map each result to a Select2-compatible
         # dict with an "id" and a "text" property.
@@ -975,8 +933,7 @@ class URLAutocompleteSelectField(BaseAutocompleteSelectField):
 
         return results, has_more
 
-    @classmethod
-    def _get_json_response(cls, request: HttpRequest, url: str) -> Any:
+    def _get_json_response(self, request: HttpRequest, url: str) -> Any:
         """Make a request to the given URL and return the response JSON.
 
         Args:
@@ -1049,30 +1006,31 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
 
     label = "Autocomplete (QuerySet)"
 
-    @classmethod
+    model: str
+    search_fields: List[str]
+    filter: Dict[str, Any]
+    exclude: Dict[str, Any]
+
     def get_results(
-        cls,
+        self,
         request: HttpRequest,
-        field: "BaseField",
         search_term: str,
         page: int,
         per_page: int,
-        record: Optional["BaseRecord"],
         **field_type_options: Any,
     ) -> Tuple[Iterable[AutocompleteResult], bool]:
         """Perform a search and return paginated results.
 
         Search is performed with a QuerySet against the configured model
-        using an __icontains filter. Each instance is JSONified to enable the
-        configured mapping to use JMESPath expressions in its values.
+        using basic filters, along with any full-text search capabilities of
+        the databse if available. Each model instance is then JSONified so
+        that it can be queries with JMESPath by the configured mapping.
 
         Args:
             request: The HTTP request.
-            field: The BaseField instance.
             search_term: The term to search for.
             page: The pagination page number.
             per_page: The pagination page size.
-            record: The record instance.
             field_type_options: The field's field_type_options after having
                 its values interpolated.
 
@@ -1095,7 +1053,7 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
         exclude: Dict[str, Any] = field_type_options.get("exclude", {})
         mapping = cast(
             AutocompleteResultMapping,
-            {**cls.DEFAULT_RESULT_MAPPING, **field_type_options.get("mapping", {})},
+            {**self.DEFAULT_MAPPING, **field_type_options.get("mapping", {})},
         )
 
         # Build a set of model field names used in the mapping values. This
@@ -1134,7 +1092,7 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
         # used to filter results.
         if any(f not in concrete_model_fields for f in search_fields):
             raise ImproperlyConfigured(
-                f"The search_fields option for {cls.__name__} fields "
+                f"The search_fields option for {self.name} fields "
                 f"must contain only the names of concrete model fields."
             )
 
@@ -1142,7 +1100,7 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
         if not search_fields:  # pragma: no cover
             logger.warning(
                 f"No search_fields were defined or discovered, and so the "
-                f"{cls.__name__} field cannot filter results with a search "
+                f"{self.name} field cannot filter results with a search "
                 f"term."
             )
 
@@ -1151,7 +1109,7 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
         if search_term and search_fields:
             # Look for a vendor-specific method for search, or use the fallback.
             search_method = getattr(
-                cls, f"_search_{connections[qs.db].vendor}", cls._search_fallback
+                self, f"_search_{connections[qs.db].vendor}", self._search_fallback
             )
             qs = search_method(qs, search_fields=search_fields, search_term=search_term)
 
@@ -1195,9 +1153,8 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
 
         return results, has_more
 
-    @classmethod
     def _search_postgresql(
-        cls,
+        self,
         queryset: "QuerySet[DjangoModel]",
         search_fields: Tuple[str, ...],
         search_term: str,
@@ -1217,7 +1174,7 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
         # Check for trigram support (the pg_trgm PostgreSQL extension).
         db_connection = connections[queryset.db]
         supports_pg_trgm = cache.get_or_set(
-            f"flexible_forms:{db_connection}:supports_pg_trgm",
+            f"flexible_forms:db:{queryset.db}:supports_pg_trgm",
             lambda: check_supports_pg_trgm(db_connection),
         )
 
@@ -1287,9 +1244,8 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
 
         return queryset
 
-    @classmethod
     def _search_fallback(
-        cls,
+        self,
         queryset: "QuerySet[DjangoModel]",
         search_fields: Tuple[str, ...],
         search_term: str,

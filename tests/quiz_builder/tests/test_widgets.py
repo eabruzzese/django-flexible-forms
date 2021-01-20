@@ -83,7 +83,7 @@ def test_autocomplete_select_empty_required() -> None:
     widget_value = widget.value_from_datadict(
         data=form_data, files=None, name=field_name
     )
-    assert widget_value == []
+    assert widget_value == "null"
 
     expected_html = """
     <select
@@ -102,9 +102,7 @@ def test_autocomplete_select_empty_required() -> None:
     </select>
     """
 
-    check_html(
-        widget, name="test", value=json.dumps(widget_value), expected_html=expected_html
-    )
+    check_html(widget, name="test", value=widget_value, expected_html=expected_html)
 
 
 def test_autocomplete_select_single_value_required() -> None:
@@ -123,7 +121,7 @@ def test_autocomplete_select_single_value_required() -> None:
     widget_value = widget.value_from_datadict(
         data=form_data, files=None, name=field_name
     )
-    assert widget_value == [{"id": "1", "text": "Test option"}]
+    assert widget_value == '{"id": "1", "text": "Test option"}'
 
     expected_html = """
     <select
@@ -146,7 +144,7 @@ def test_autocomplete_select_single_value_required() -> None:
     check_html(
         widget,
         name="test",
-        value=json.dumps(widget_value),
+        value=widget_value,
         expected_html=expected_html,
     )
 
@@ -167,7 +165,7 @@ def test_autocomplete_select_single_value_freetext() -> None:
     widget_value = widget.value_from_datadict(
         data=form_data, files=None, name=field_name
     )
-    assert widget_value == [{"id": "freetext option", "text": "freetext option"}]
+    assert widget_value == '{"id": "freetext option", "text": "freetext option"}'
 
     expected_html = """
     <select
@@ -190,19 +188,9 @@ def test_autocomplete_select_single_value_freetext() -> None:
     check_html(
         widget,
         name="test",
-        value=json.dumps(widget_value),
+        value=widget_value,
         expected_html=expected_html,
     )
-
-
-def test_autocomplete_select_format_decode() -> None:
-    """Ensure that format_value returns non-JSON values as-is."""
-    widget = AutocompleteSelect()
-
-    values = (1, 1.0, "not json", {}, [])
-
-    for value in values:
-        assert widget.format_value(value) is value
 
 
 def test_autocomplete_select_multiple_value_required() -> None:
@@ -224,10 +212,12 @@ def test_autocomplete_select_multiple_value_required() -> None:
     widget_value = widget.value_from_datadict(
         data=form_data, files=None, name=field_name
     )
-    assert widget_value == [
-        {"id": "1", "text": "Test option"},
-        {"id": "2", "text": "Test option 2"},
-    ]
+    assert widget_value == json.dumps(
+        [
+            {"id": "1", "text": "Test option"},
+            {"id": "2", "text": "Test option 2"},
+        ]
+    )
 
     expected_html = """
     <select
@@ -252,6 +242,6 @@ def test_autocomplete_select_multiple_value_required() -> None:
     check_html(
         widget,
         name="test",
-        value=json.dumps(widget_value),
+        value=widget_value,
         expected_html=expected_html,
     )

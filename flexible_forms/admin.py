@@ -498,8 +498,8 @@ class RecordsAdmin(FlexibleAdminMixin, ModelAdmin):
         if obj:
             return type(
                 obj.as_django_form(
-                    request.POST,
-                    request.FILES,
+                    data=request.POST,
+                    files=request.FILES,
                 )
             )
 
