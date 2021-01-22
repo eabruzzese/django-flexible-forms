@@ -165,7 +165,10 @@ def test_autocomplete_select_single_value_freetext() -> None:
     widget_value = widget.value_from_datadict(
         data=form_data, files=None, name=field_name
     )
-    assert widget_value == '{"id": "freetext option", "text": "freetext option"}'
+    assert (
+        widget_value
+        == '{"id": "freetext option", "text": "freetext option", "value": "freetext option"}'
+    )
 
     expected_html = """
     <select
@@ -181,7 +184,7 @@ def test_autocomplete_select_single_value_freetext() -> None:
         data-tags="true"
         data-theme="admin-autocomplete"
         name="test">
-    <option selected value='{"id":"freetext option","text":"freetext option"}'>freetext option</option>
+    <option selected value='{"id":"freetext option","text":"freetext option","value":"freetext option"}'>freetext option</option>
     </select>
     """
 

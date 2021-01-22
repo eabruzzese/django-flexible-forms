@@ -96,11 +96,18 @@ class BaseRecordForm(forms.ModelForm):
 
         # If the record has a form associated already, don't allow it to be changed.
         if self.form:
-            self.fields["form"].disabled = True
-            self.fields["form"].widget = HiddenInput()
-            form_field_alias = instance.FlexibleMeta.form_field_name
-            self.fields[form_field_alias].disabled = True
-            self.fields[form_field_alias].widget = HiddenInput()
+            form_field_name = instance.FlexibleMeta.form_field_name
+            self.fields[form_field_name].disabled = True
+            self.fields[form_field_name].widget = HiddenInput()
+
+            # If the form relation field is aliased, remove the original to
+            # prevent duplicate validation efforts.
+            if form_field_name != "form":
+                self.fields = {
+                    name: field
+                    for name, field in self.fields.items()
+                    if name not in ("form",)
+                }
 
         # Emit a signal after initializing the form.
         post_form_init.send(
@@ -111,7 +118,9 @@ class BaseRecordForm(forms.ModelForm):
     def full_clean(self) -> None:
         """Perform a full clean of the form.
 
-        Emits signals before and after.
+        Emits signals before and after, and excludes the form relation from
+        validation if it's already set (to eliminate database queries related
+        to the schema lookup).
         """
         pre_form_clean.send(sender=self.__class__, form=self)
         clean_result = super().full_clean()

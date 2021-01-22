@@ -480,21 +480,20 @@ class RecordsAdmin(FlexibleAdminMixin, ModelAdmin):
         if fieldsets is not default_fieldsets:
             form = self.get_form(request, record)
             form_fields = frozenset(form.base_fields.keys())  # type: ignore
+            record_fields = tuple(
+                f.name
+                for f in record._meta.get_fields(include_parents=True)
+                if f.name in form_fields
+            )
 
-            fieldsets = [
-                *fieldsets,
-                # Add a metadata fieldset for managing top-level attributes of the record.
-                (
-                    "Metadata",
-                    {
-                        "fields": (
-                            f.name
-                            for f in record._meta.get_fields(include_parents=True)
-                            if f.name in form_fields
-                        )
-                    },
-                ),
-            ]
+            # If the record model has top-level attributes (in addition to
+            # dynamic form attributes), add a metadata fieldset for managing
+            # them.
+            if record_fields:
+                fieldsets = [
+                    *fieldsets,
+                    ("Metadata", {"fields": record_fields}),
+                ]
 
         return fieldsets
 

@@ -3,6 +3,7 @@
 """Tests for form-related models."""
 
 
+from typing import List, cast
 import pytest
 from django import forms
 from django.core import management
@@ -27,6 +28,7 @@ from flexible_forms.fields import (
 from flexible_forms.models import (
     AliasField,
     BaseForm,
+    BaseRecord,
     FlexibleBaseModel,
     FlexibleForms,
 )
@@ -416,20 +418,26 @@ def test_form_lifecycle() -> None:
     record_count = AppRecord.objects.count()
     unpersisted_record = django_form.save(commit=False)
     cleaned_record_data = django_form.cleaned_data
-    del cleaned_record_data["form"]
-    assert unpersisted_record._data == cleaned_record_data
+    del cleaned_record_data[AppRecord.FlexibleMeta.form_field_name]
+    assert {**unpersisted_record._data, "uuid": None} == cleaned_record_data
     assert AppRecord.objects.count() == record_count
 
     # Saving the form with commit=True should produce the same result as
     # commit=False, but actually persist the changes to the database.
     persisted_record = django_form.save(commit=True)
-    assert persisted_record._data == cleaned_record_data
+    assert {**persisted_record._data, "uuid": None} == cleaned_record_data
     assert AppRecord.objects.count() == record_count + 1
 
     # Recreating the form from the persisted record should produce a valid,
     # unchanged form. Calling save() on the form should noop.
     same_form = persisted_record.as_django_form(field_values)
-    assert same_form.initial == {**persisted_record._data, "form": form}
+    assert same_form.initial == {
+        **persisted_record._data,
+        "form": persisted_record.form,
+        "app_form": persisted_record.app_form_id,
+        "id": persisted_record.id,
+        "uuid": persisted_record.uuid,
+    }
     assert same_form.is_valid(), same_form.errors
     assert not same_form.has_changed(), same_form.changed_data
     same_record = same_form.save()
@@ -580,7 +588,7 @@ def test_record_queries(django_assert_num_queries) -> None:
     #   5. One to fetch the list of attributes for all of the records.
     #
     with django_assert_num_queries(5):
-        records = list(AppRecord.objects.all())
+        records = cast(List[BaseRecord], list(AppRecord.objects.all()))
 
     # Fetching the data from any of the records should not require any
     # additional queries.
