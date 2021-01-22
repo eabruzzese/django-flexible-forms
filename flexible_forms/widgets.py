@@ -170,11 +170,20 @@ class AutocompleteSelect(Select):
             if v in self.EMPTY_VALUES:
                 continue
 
-            # If the value looks like a JSON object, parse it.
-            if v.startswith(("{", "[")) and v.endswith(("]", "}")):
-                parsed_v = json.loads(v)
-            else:
-                parsed_v = json.loads(stable_json({"id": v, "text": v}))
+            parsed_v = None
+
+            # If the value is already a dict, we'll just consider it to be
+            # already parsed.
+            if isinstance(v, dict):
+                parsed_v = v
+
+            # If the value is a string and it looks like a JSON object, parse
+            # it as one.
+            elif isinstance(v, str):
+                if v.startswith(("{", "[")) and v.endswith(("]", "}")):
+                    parsed_v = json.loads(v)
+                else:
+                    parsed_v = json.loads(stable_json({"id": v, "text": v}))
 
             parsed_value.append(parsed_v)
 

@@ -65,14 +65,19 @@ class BaseRecordForm(forms.ModelForm):
         instance = instance or opts.model(form=self.form)
         initial = {**instance._data, **(initial or {}), "form": self.form}
 
-        # If any of the form fields have a "value" specified in their
-        # "_modifiers", use it if the form is bound.
-        if data is not None:
-            for field_name, field in self.base_fields.items():
-                try:
-                    data[field_name] = field._modifiers["value"]  # type: ignore
-                except (AttributeError, KeyError):
-                    continue
+        # If any of the form fields have a "_value" attribute, use it in either
+        # the data (if the form is bound) or the initial (if the form is
+        # unbound).
+        for field_name, field in self.base_fields.items():
+            if not hasattr(field, "_value"):
+                continue
+            try:
+                if data is not None:
+                    data[field_name] = field._value  # type: ignore
+                else:
+                    initial[field_name] = field._value  # type: ignore
+            except (AttributeError, KeyError):
+                continue
 
         # Emit a signal before initializing the form.
         pre_form_init.send(

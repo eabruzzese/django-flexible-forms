@@ -18,6 +18,7 @@ from typing import (
     Set,
     Tuple,
     Type,
+    Union,
     cast,
 )
 from urllib.parse import urlencode
@@ -414,6 +415,15 @@ class FieldType(metaclass=FieldTypeMetaclass):
             form_field.widget = form_widgets.HiddenInput()
             form_field.required = False
 
+        return form_field
+
+    def apply_value(
+        self,
+        form_field: form_fields.Field,
+        value: Union[str, int, DjangoModel],
+        **kwargs: Any,
+    ) -> form_fields.Field:
+        form_field._value = value
         return form_field
 
 
@@ -1123,35 +1133,41 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
         # Parse the search response and map each result to a Select2-compatible
         # dict with an "id" and a "text" property.
         for instance in raw_results:
-            # Create a JSON representation based on the fields used in the
-            # mapping expressions so that the result can be mapped with
-            # JMESPath.
-            instance_json = {f: getattr(instance, f, None) for f in expression_fields}
-
-            result_text = str(jp(mapping["text"], instance_json))
-            result_value = jp(mapping["value"], instance_json, default=result_text)
-            result_extra = {
-                k: jp(v, instance_json) for k, v in mapping["extra"].items()
-            }
-
-            mapped_result = {
-                "value": result_value,
-                "text": result_text,
-                "extra": result_extra,
-            }
-
-            # The "id" is the value eventually stored in the database. In this
-            # case, it is a stringified version of the result JSON so that it can
-            # be deserialized when rendering the initial value for the widget.
-            #
-            # The use of "id" as opposed to "value" or something that makes
-            # more semantic sense is to support the use of the select2
-            # implementation that ships with the Django admin.
-            mapped_result["id"] = stable_json(mapped_result)
-
-            results.append(cast(AutocompleteResult, mapped_result))
+            results.append(self.result_from_instance(instance, mapping=mapping))
 
         return results, has_more
+
+    def result_from_instance(
+        self, instance: DjangoModel, mapping: AutocompleteResultMapping
+    ) -> AutocompleteResult:
+        expression_fields: Set[str] = set()
+        for expr in (*mapping.values(), *mapping["extra"].values()):
+            if not isinstance(expr, str):
+                continue
+            expression_fields.update(get_expression_fields(expr))
+
+        instance_json = {f: getattr(instance, f, None) for f in expression_fields}
+
+        result_text = str(jp(mapping["text"], instance_json))
+        result_value = jp(mapping["value"], instance_json, default=result_text)
+        result_extra = {k: jp(v, instance_json) for k, v in mapping["extra"].items()}
+
+        mapped_result = {
+            "value": result_value,
+            "text": result_text,
+            "extra": result_extra,
+        }
+
+        # The "id" is the value eventually stored in the database. In this
+        # case, it is a stringified version of the result JSON so that it can
+        # be deserialized when rendering the initial value for the widget.
+        #
+        # The use of "id" as opposed to "value" or something that makes
+        # more semantic sense is to support the use of the select2
+        # implementation that ships with the Django admin.
+        mapped_result["id"] = stable_json(mapped_result)
+
+        return mapped_result
 
     def _search_postgresql(
         self,
@@ -1293,6 +1309,30 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
         queryset = queryset.order_by(f"-_search_rank")
 
         return queryset
+
+    def apply_value(
+        self,
+        form_field: form_fields.Field,
+        value: Union[str, int, DjangoModel],
+        **kwargs: Any,
+    ) -> form_fields.Field:
+        model_instance = value if isinstance(value, DjangoModel) else None
+
+        # If the given value isn't a model instance, assume it's the primary key of the instance and look it up.
+        if not model_instance:
+            model_cls = cast(Type[DjangoModel], apps.get_model(self.model))
+            model_instance = model_cls._default_manager.get(pk=value)
+
+        # Map the retrieved model instance to an autocomplete-friendly result dict.
+        form_field._value = self.result_from_instance(
+            model_instance,
+            mapping=cast(
+                AutocompleteResultMapping,
+                {**self.DEFAULT_MAPPING, **self.mapping},
+            ),
+        )
+
+        return form_field
 
 
 class QuerysetAutocompleteSelectMultipleField(QuerysetAutocompleteSelectField):
