@@ -471,9 +471,32 @@ class RecordsAdmin(FlexibleAdminMixin, ModelAdmin):
         if obj is None:
             return default_fieldsets
 
+        record = cast("BaseRecord", obj)
+
         # If the record's form specifies a fieldsets configuration, use it.
         # Otherwise, default to Django admin behavior.
-        return cast("BaseRecord", obj).form.as_django_fieldsets() or default_fieldsets
+        fieldsets = record.form.as_django_fieldsets() or default_fieldsets
+
+        if fieldsets is not default_fieldsets:
+            form = self.get_form(request, obj)
+            form_fields = frozenset(form.base_fields.keys())
+
+            fieldsets = (
+                *fieldsets,
+                # Add a metadata fieldset for managing top-level attributes of the record.
+                (
+                    "Metadata",
+                    {
+                        "fields": (
+                            f.name
+                            for f in record._meta.get_fields(include_parents=True)
+                            if f.name in form_fields
+                        )
+                    },
+                ),
+            )
+
+        return fieldsets
 
     def get_form(
         self,

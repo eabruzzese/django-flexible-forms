@@ -7,6 +7,7 @@ from typing import Any, Dict, Mapping, Optional, cast
 from django import forms
 from django.core.files.base import File
 from django.forms.widgets import HiddenInput
+from django.forms.models import ALL_FIELDS
 
 from flexible_forms.cache import cache
 from flexible_forms.models import BaseForm, BaseRecord
@@ -28,7 +29,7 @@ class BaseRecordForm(forms.ModelForm):
     """
 
     class Meta:
-        fields = ("form",)
+        fields = ALL_FIELDS
         model: "BaseRecord"
 
     def __init__(
@@ -93,9 +94,13 @@ class BaseRecordForm(forms.ModelForm):
             data=data, files=files, instance=instance, initial=initial, **kwargs
         )
 
+        # If the record has a form associated already, don't allow it to be changed.
         if self.form:
             self.fields["form"].disabled = True
             self.fields["form"].widget = HiddenInput()
+            form_field_alias = instance.FlexibleMeta.form_field_name
+            self.fields[form_field_alias].disabled = True
+            self.fields[form_field_alias].widget = HiddenInput()
 
         # Emit a signal after initializing the form.
         post_form_init.send(
