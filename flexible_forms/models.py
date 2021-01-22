@@ -1123,10 +1123,8 @@ class BaseRecord(FlexibleBaseModel):
 
         return f"New {record_type}" if not self.pk else f"{record_type} {self.pk}"
 
-    def __init__(
-        self, *args: Any, form: Optional[BaseForm] = None, **kwargs: Any
-    ) -> None:
-        super().__init__(*args, form=form, **kwargs)
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
         self._staged_changes = {}
         self._initialized = True
 
