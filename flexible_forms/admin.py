@@ -478,10 +478,10 @@ class RecordsAdmin(FlexibleAdminMixin, ModelAdmin):
         fieldsets = record.form.as_django_fieldsets() or default_fieldsets
 
         if fieldsets is not default_fieldsets:
-            form = self.get_form(request, obj)
-            form_fields = frozenset(form.base_fields.keys())
+            form = self.get_form(request, record)
+            form_fields = frozenset(form.base_fields.keys())  # type: ignore
 
-            fieldsets = (
+            fieldsets = [
                 *fieldsets,
                 # Add a metadata fieldset for managing top-level attributes of the record.
                 (
@@ -494,7 +494,7 @@ class RecordsAdmin(FlexibleAdminMixin, ModelAdmin):
                         )
                     },
                 ),
-            )
+            ]
 
         return fieldsets
 

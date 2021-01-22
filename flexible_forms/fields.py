@@ -18,7 +18,6 @@ from typing import (
     Set,
     Tuple,
     Type,
-    Union,
     cast,
 )
 from urllib.parse import urlencode
@@ -420,10 +419,25 @@ class FieldType(metaclass=FieldTypeMetaclass):
     def apply_value(
         self,
         form_field: form_fields.Field,
-        value: Union[str, int, DjangoModel],
+        value: Any,
         **kwargs: Any,
     ) -> form_fields.Field:
-        form_field._value = value
+        """Apply the "value" field modifier.
+
+        Allows a field modifier to set the value of a field based on an
+        expression.
+
+        Args:
+            form_field: The form field for which to set the value.
+            value: The new value.
+            kwargs: Unused.
+
+        Returns:
+            form_fields.Field: The given form_field, modified to use the
+                given value.
+        """
+        setattr(form_field, "_value", value)
+
         return form_field
 
 
@@ -723,9 +737,6 @@ class BaseAutocompleteSelectField(FieldType):
         developers to implement fine-grained search behavior.
 
         Args:
-            field: The Field record.
-            record: The record instance to which the form is bound, if
-                available.
             form_widget_options: Parameters passed to the form widget
                 constructor.
 
@@ -1017,6 +1028,7 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
     label = "Autocomplete (QuerySet)"
 
     model: str
+    mapping: AutocompleteResultMapping
     search_fields: List[str]
     filter: Dict[str, Any]
     exclude: Dict[str, Any]
@@ -1140,6 +1152,17 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
     def result_from_instance(
         self, instance: DjangoModel, mapping: AutocompleteResultMapping
     ) -> AutocompleteResult:
+        """Create an autocomplete-compatible result from a model instance.
+
+        Uses the given mapping to generate the result data structure.
+
+        Args:
+            instance: The model instance to map to the result.
+            mapping: The mapping to follow.
+
+        Returns:
+            AutocompleteResult: An autocomplete-compatible result.
+        """
         expression_fields: Set[str] = set()
         for expr in (*mapping.values(), *mapping["extra"].values()):
             if not isinstance(expr, str):
@@ -1167,7 +1190,7 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
         # implementation that ships with the Django admin.
         mapped_result["id"] = stable_json(mapped_result)
 
-        return mapped_result
+        return cast(AutocompleteResult, mapped_result)
 
     def _search_postgresql(
         self,
@@ -1313,9 +1336,24 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
     def apply_value(
         self,
         form_field: form_fields.Field,
-        value: Union[str, int, DjangoModel],
+        value: Any,
         **kwargs: Any,
     ) -> form_fields.Field:
+        """Set the value of the autocomplete field.
+
+        Given a model instance or primary key as the value, returns a mapped
+        autocomplete-compatible result.
+
+        Args:
+            form_field: The field for which to set the value.
+            value: The model instance or primary key for which to generate an
+                autocomplete result.
+            kwargs: Unused.
+
+        Returns:
+            form_fields.Field: The given form field, modified to include the
+                new value.
+        """
         model_instance = value if isinstance(value, DjangoModel) else None
 
         # If the given value isn't a model instance, assume it's the primary key of the instance and look it up.
@@ -1324,7 +1362,7 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
             model_instance = model_cls._default_manager.get(pk=value)
 
         # Map the retrieved model instance to an autocomplete-friendly result dict.
-        form_field._value = self.result_from_instance(
+        result = self.result_from_instance(
             model_instance,
             mapping=cast(
                 AutocompleteResultMapping,
@@ -1332,7 +1370,7 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
             ),
         )
 
-        return form_field
+        return super().apply_value(form_field, result, **kwargs)
 
 
 class QuerysetAutocompleteSelectMultipleField(QuerysetAutocompleteSelectField):

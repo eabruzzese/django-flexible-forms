@@ -6,8 +6,8 @@ from typing import Any, Dict, Mapping, Optional, cast
 
 from django import forms
 from django.core.files.base import File
-from django.forms.widgets import HiddenInput
 from django.forms.models import ALL_FIELDS
+from django.forms.widgets import HiddenInput
 
 from flexible_forms.cache import cache
 from flexible_forms.models import BaseForm, BaseRecord
@@ -174,8 +174,6 @@ class BaseRecordForm(forms.ModelForm):
 
         Args:
             commit: If True, persists the data to the database.
-            validate: If False, attempts to persist the record even if
-                validation is failing.
 
         Returns:
             instance: The Record model instance.

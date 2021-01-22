@@ -43,7 +43,7 @@ class AutocompleteSelect(Select):
         self.allow_freetext = allow_freetext
         self.placeholder = placeholder or ""
 
-    def optgroups(
+    def optgroups(  # type: ignore
         self, name: str, value: str, attrs: Optional[Dict[Any, Any]] = None
     ) -> List[Tuple[None, List[Dict[str, Any]], int]]:
         """Build a list of optgroups for populating the select.
@@ -56,33 +56,30 @@ class AutocompleteSelect(Select):
         representation of the originally-selected result from the
         autocomplete API call.
 
-        TODO: This method needs its types fixed.
-
         Args:
             name: The name of the widget in the form.
             value: The value of the field.
-            args: Unused.
-            kwargs: Unused.
+            attrs: Unused.
 
         Returns:
             List[Tuple[Optional[str], List[Tuple[Any, Any]], int]]: Optgroups
                 for the widget.
         """
-        # Parse the given value as a JSON string, and make it a list if it
-        # isn't already so that we can iterate over it when we enumerate
-        # selected options.
-        value = json.loads(value)
-        if not isinstance(value, list):
-            value = [value]
-        value: List[Dict[str, Any]] = cast(List[Dict[str, Any]], value)
-
         default: Tuple[None, List[Dict[str, Any]], int] = (None, [], 0)
         groups = [default]
         has_selected = False
 
+        # Parse the given value as a JSON string, and make it a list if it
+        # isn't already so that we can iterate over it when we enumerate
+        # selected options.
+        parsed_value = json.loads(value)
+        parsed_value = (
+            parsed_value if isinstance(parsed_value, list) else [parsed_value]
+        )
+
         selected_choices = {
             stable_json(v)
-            for v in value
+            for v in parsed_value
             if not self._choice_has_empty_value((stable_json(v), ""))
         }
 
@@ -90,11 +87,13 @@ class AutocompleteSelect(Select):
             default[1].append(self.create_option(name, "", "", False, 0))
 
         choices = [
-            (stable_json(v), v["text"]) for v in value if v not in (None, "", "null")
+            (stable_json(v), v["text"])
+            for v in parsed_value
+            if v not in (None, "", "null")
         ]
 
         for option_value, option_label in choices:
-            selected = str(option_value) in value and (
+            selected = str(option_value) in parsed_value and (
                 has_selected is False or self.allow_multiple_selected
             )
             has_selected |= selected
@@ -154,7 +153,7 @@ class AutocompleteSelect(Select):
             name: The name of the widget.
 
         Returns:
-            List[str]: A list of JSON string values produced by the widget.
+            str: The JSON value produced by the widget.
         """
         value = super().value_from_datadict(data, files, name)
 
@@ -164,7 +163,7 @@ class AutocompleteSelect(Select):
         if not isinstance(value, list):
             value = [value]
 
-        parsed_value: List[str] = []
+        parsed_value: List[dict] = []
         for v in value:
             # Skip empty values.
             if v in self.EMPTY_VALUES:
@@ -180,12 +179,13 @@ class AutocompleteSelect(Select):
             # If the value is a string and it looks like a JSON object, parse
             # it as one.
             elif isinstance(v, str):
-                if v.startswith(("{", "[")) and v.endswith(("]", "}")):
+                if v.startswith("{") and v.endswith("}"):
                     parsed_v = json.loads(v)
                 else:
-                    parsed_v = json.loads(stable_json({"id": v, "text": v}))
+                    parsed_v = json.loads(stable_json({"id": v, "text": v, "value": v}))
 
-            parsed_value.append(parsed_v)
+            if parsed_v is not None:
+                parsed_value.append(parsed_v)
 
         # If only one value is expected, unwrap it from the parsed list.
         final_value = (

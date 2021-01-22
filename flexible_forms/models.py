@@ -734,6 +734,10 @@ class BaseField(FlexibleBaseModel):
     ) -> FieldType:
         """Return the flexible FieldType for the field.
 
+        Args:
+            record: The record instance bound to the form.
+            field_values: The current values of the fields in the form.
+
         Returns:
             FieldType: The FieldType class for the field.
         """
@@ -775,8 +779,8 @@ class BaseField(FlexibleBaseModel):
         the widget.
 
         Args:
-            record: The record instance that the form is bound to, if
-                available.
+            record: The record instance bound to the form.
+            field_values: The current values of the fields in the form.
 
         Returns:
             Widget: The configured Django form Widget instance.
