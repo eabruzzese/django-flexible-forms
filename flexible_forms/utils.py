@@ -238,7 +238,7 @@ def interpolate(data: Any, context: Dict[str, Any]) -> Any:
     return data
 
 
-@interpolate.register
+@interpolate.register(str)
 def _interpolate_str(data: str, context: Dict[str, Any]) -> RenderedString:
     """Handles interpolation of string values.
 
@@ -271,7 +271,7 @@ def _interpolate_str(data: str, context: Dict[str, Any]) -> RenderedString:
     return rendered_string
 
 
-@interpolate.register
+@interpolate.register(dict)
 def _interpolate_dict(data: dict, context: Dict[str, Any]) -> dict:
     """Handles interpolation of dict values.
 
@@ -288,7 +288,7 @@ def _interpolate_dict(data: dict, context: Dict[str, Any]) -> dict:
     return {k: interpolate(v, context) for k, v in data.items()}
 
 
-@interpolate.register
+@interpolate.register(list)
 def _interpolate_list(data: list, context: Dict[str, Any]) -> list:
     """Handles interpolation of list values.
 
