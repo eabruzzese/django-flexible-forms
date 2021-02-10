@@ -703,7 +703,7 @@ class HiddenJSONField(FieldType):
 
     label = "Hidden JSON Field"
 
-    form_field_class = form_fields.JSONField
+    form_field_class = JSONFormField
     form_widget_class = form_widgets.HiddenInput
     model_field_class = JSONField
 

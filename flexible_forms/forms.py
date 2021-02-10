@@ -99,15 +99,8 @@ class BaseRecordForm(forms.ModelForm):
             form_field_name = instance.FlexibleMeta.form_field_name
             self.fields[form_field_name].disabled = True
             self.fields[form_field_name].widget = HiddenInput()
-
-            # If the form relation field is aliased, remove the original to
-            # prevent duplicate validation efforts.
-            if form_field_name != "form":
-                self.fields = {
-                    name: field
-                    for name, field in self.fields.items()
-                    if name not in ("form",)
-                }
+            self.fields["form"].disabled = True
+            self.fields["form"].widget = HiddenInput()
 
         # Emit a signal after initializing the form.
         post_form_init.send(
