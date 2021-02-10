@@ -699,6 +699,15 @@ class ImageUploadField(FieldType):
     model_field_class = ImageField
 
 
+class HiddenJSONField(FieldType):
+
+    label = "Hidden JSON Field"
+
+    form_field_class = form_fields.JSONField
+    form_widget_class = form_widgets.HiddenInput
+    model_field_class = JSONField
+
+
 AutocompleteResult = TypedDict("AutocompleteResult", {"id": str, "text": str})
 AutocompleteResultMapping = TypedDict(
     "AutocompleteResultMapping",

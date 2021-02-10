@@ -267,7 +267,7 @@ def json_field_strategy(field: forms.JSONField) -> str:
             )
         )
 
-        if field.widget.allow_multiple_selected and not isinstance(value, list):
+        if getattr(field.widget, "allow_multiple_selected", False) and not isinstance(value, list):
             value = [value]
 
         return json.dumps(
