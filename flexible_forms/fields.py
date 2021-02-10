@@ -25,11 +25,6 @@ from urllib.parse import urlencode
 import requests
 import simpleeval
 from django.apps import apps
-from django.contrib.postgres.search import (
-    SearchQuery,
-    SearchRank,
-    TrigramSimilarity,
-)
 from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
 from django.core.paginator import Paginator
@@ -1210,6 +1205,12 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
         Returns:
             QuerySet[DjangoModel]: The filtered QuerySet.
         """
+        from django.contrib.postgres.search import (
+            SearchQuery,
+            SearchRank,
+            TrigramSimilarity,
+        )
+
         # Check for trigram support (the pg_trgm PostgreSQL extension).
         db_connection = connections[queryset.db]
         supports_pg_trgm = cache.get_or_set(

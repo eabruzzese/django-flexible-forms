@@ -4,6 +4,7 @@
 
 
 from typing import List, cast
+
 import pytest
 from django import forms
 from django.core import management

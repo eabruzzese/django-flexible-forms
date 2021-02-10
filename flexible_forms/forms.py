@@ -118,13 +118,12 @@ class BaseRecordForm(forms.ModelForm):
     def full_clean(self) -> None:
         """Perform a full clean of the form.
 
-        Emits signals before and after, and excludes the form relation from
-        validation if it's already set (to eliminate database queries related
-        to the schema lookup).
+        Emits signals before and after, and excludes the form relation
+        from validation if it's already set (to eliminate database
+        queries related to the schema lookup).
         """
         pre_form_clean.send(sender=self.__class__, form=self)
         clean_result = super().full_clean()
-        post_form_clean.send(sender=self.__class__, form=self)
 
         record_pk = self.instance.pk
         record_opts = self.instance._meta
@@ -148,6 +147,10 @@ class BaseRecordForm(forms.ModelForm):
             f"flexible_forms:field_values:{app_label}:{model_name}:{record_pk}",
             field_values,
             timeout=None,
+        )
+
+        post_form_clean.send(
+            sender=self.__class__, form=self, field_values=field_values
         )
 
         return clean_result
