@@ -75,8 +75,6 @@ class BaseRecordForm(forms.ModelForm):
             try:
                 if data is not None:
                     data[field_name] = field._value  # type: ignore
-                else:
-                    initial[field_name] = field._value  # type: ignore
             except (AttributeError, KeyError):
                 continue
 
@@ -97,16 +95,71 @@ class BaseRecordForm(forms.ModelForm):
         # If the record has a form associated already, don't allow it to be changed.
         if self.form:
             form_field_name = instance.FlexibleMeta.form_field_name
-            self.fields[form_field_name].disabled = True
-            self.fields[form_field_name].widget = HiddenInput()
-            self.fields["form"].disabled = True
-            self.fields["form"].widget = HiddenInput()
+            if form_field_name in self.fields:
+                self.fields[form_field_name].disabled = True
+                self.fields[form_field_name].widget = HiddenInput()
+            if "form" in self.fields:
+                self.fields["form"].disabled = True
+                self.fields["form"].widget = HiddenInput()
 
         # Emit a signal after initializing the form.
         post_form_init.send(
             sender=self.__class__,
             form=self,
         )
+
+    def get_value(self, field_name: str, raw: bool = False) -> Any:
+        """Return the value of the field with the given name.
+
+        If raw is specified, returns the value as-is with no cleaning performed.
+
+        Args:
+            field_name: The name of the field for which to return the value.
+            raw: Return the raw value from the data dict.
+
+        Returns:
+            Any: The value of the field.
+        """
+        field: forms.Field = self.fields[field_name]
+        field.widget = cast(forms.Widget, field.widget)
+
+        value = (
+            self.get_initial_for_field(field, field_name)
+            if field.disabled
+            else field.widget.value_from_datadict(
+                self.data, self.files, self.add_prefix(field_name)
+            )
+        )
+
+        # If raw was specified, return the value as-is.
+        if raw:
+            return value
+
+        # Attempt to clean the field value. This may throw a validation error.
+        if isinstance(field, forms.FileField):
+            initial = self.get_initial_for_field(field, field_name)
+            value = field.clean(value, initial)
+        else:
+            value = field.clean(value)
+
+        if hasattr(self, f"clean_{field_name}"):
+            value = getattr(self, f"clean_{field_name}")()
+
+        return value
+
+    def set_value(self, field_name: str, value: Any) -> None:
+        """Set the value of the field with the given name.
+
+        Args:
+            field_name: The name of the field for which to set the value.
+            value: The new value for the field.
+        """
+        field: forms.Field = self.fields[field_name]
+
+        if isinstance(field, forms.FileField):
+            self.files[field_name] = value
+        else:
+            self.data[field_name] = value
 
     def full_clean(self) -> None:
         """Perform a full clean of the form.
@@ -116,7 +169,8 @@ class BaseRecordForm(forms.ModelForm):
         queries related to the schema lookup).
         """
         pre_form_clean.send(sender=self.__class__, form=self)
-        clean_result = super().full_clean()
+
+        super().full_clean()
 
         record_pk = self.instance.pk
         record_opts = self.instance._meta
@@ -145,8 +199,6 @@ class BaseRecordForm(forms.ModelForm):
         post_form_clean.send(
             sender=self.__class__, form=self, field_values=field_values
         )
-
-        return clean_result
 
     def clean(self) -> Dict[str, Any]:
         """Clean the form data before saving."""
@@ -187,6 +239,8 @@ class BaseRecordForm(forms.ModelForm):
 
         # Update any changed attributes.
         for field_name in self.changed_data:
+            if field_name not in self.cleaned_data:
+                continue
             setattr(self.instance, field_name, self.cleaned_data[field_name])
 
         super().save(commit=commit)

@@ -700,6 +700,7 @@ class ImageUploadField(FieldType):
 
 
 class HiddenJSONField(FieldType):
+    """A field for storing JSON data behind the scenes."""
 
     label = "Hidden JSON Field"
 
@@ -716,13 +717,34 @@ AutocompleteResultMapping = TypedDict(
 )
 
 
+class AutocompleteJSONField(JSONFormField):
+    """A Django form field for storing autocomplete results."""
+
+    EMPTY_VALUES: Tuple[Any, ...] = (None, "null", "[]", [])
+
+    def has_changed(self, initial: Any, data: Any) -> bool:
+        """Returns True if the field value has changed.
+
+        Considers empty lists and "null" to be equivalent to None.
+
+        Args:
+            initial: The initial value.
+            data: The new value.
+
+        Returns:
+            bool: True if the field value has changed.
+        """
+        data = None if data in self.EMPTY_VALUES else data
+        return cast(bool, super().has_changed(initial, data))
+
+
 class BaseAutocompleteSelectField(FieldType):
     """An interface for implementing autocomplete select fields."""
 
     class Meta:
         abstract = True
 
-    form_field_class = JSONFormField
+    form_field_class = AutocompleteJSONField
     form_widget_class = AutocompleteSelect
     model_field_class = JSONField
 
@@ -1021,8 +1043,6 @@ class URLAutocompleteSelectMultipleField(URLAutocompleteSelectField):
     """An autocomplete field that supports multiple selections."""
 
     label = "Autocomplete Multiple (URL)"
-
-    form_field_class = JSONFormField
     form_widget_class = AutocompleteSelectMultiple
 
 

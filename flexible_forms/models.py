@@ -10,6 +10,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Dict,
+    Iterable,
     List,
     Mapping,
     Optional,
@@ -550,25 +551,24 @@ class BaseForm(FlexibleBaseModel):
         files: Optional[Dict[str, Any]] = None,
         instance: Optional["BaseRecord"] = None,
         initial: Optional[Mapping[str, Any]] = None,
+        exclude: Iterable[str] = (),
         **kwargs: Any,
     ) -> "BaseRecordForm":
         """Return the form represented as a Django form instance.
 
         Args:
-            data: Data to be passed to the
-                Django form constructor.
-            files: Data to be passed to the
-                Django form constructor.
-            instance: The Record instance to be passed to
-                the Django form constructor.
-            initial: Initial values for the
-                form fields.
+            data: Data to be passed to the Django form constructor.
+            files: Data to be passed to the Django form constructor.
+            instance: The Record instance to be passed to the Django form
+                constructor.
+            initial: Initial values for the form fields.
+            exclude: Field names to exclude from the form.
             **kwargs: Passed to the Django ModelForm constructor.
 
         Returns:
             BaseRecordForm: A configured BaseRecordForm (a Django ModelForm instance).
         """
-        all_fields = self.fields.all()
+        all_fields = tuple(f for f in self.fields.all() if f.name not in exclude)
 
         # Build a dict containing all field values. This combines all of the
         # form data into a single structure that will be used when evaluating
@@ -601,7 +601,10 @@ class BaseForm(FlexibleBaseModel):
                 "Meta": type(
                     "Meta",
                     (BaseRecordForm.Meta,),
-                    {"model": RecordModel},
+                    {
+                        "model": RecordModel,
+                        "exclude": exclude,
+                    },
                 ),
                 **form_fields,
             },
@@ -1159,7 +1162,7 @@ class BaseRecord(FlexibleBaseModel):
             return {}
         return {f.name: f for f in self.form.fields.all()}
 
-    @cached_property
+    @property
     def _data(self) -> Mapping[str, Any]:
         """Return a dict of Record attributes and their values.
 
