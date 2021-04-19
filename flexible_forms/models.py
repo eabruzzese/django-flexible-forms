@@ -43,6 +43,7 @@ from django.dispatch.dispatcher import receiver
 from django.forms.widgets import Widget
 from django.utils.functional import cached_property
 from django.utils.text import slugify
+from flexible_forms.signals import pre_form_class_prepare, post_form_class_prepare
 from simpleeval import FunctionNotDefined, NameNotDefined
 
 from flexible_forms.fields import FIELD_TYPES, FieldType
@@ -592,6 +593,18 @@ class BaseForm(FlexibleBaseModel):
         # Import the form class inline to prevent a circular import.
         from flexible_forms.forms import BaseRecordForm
 
+        # Send a signal before preparing the form class to give receivers an
+        # opportunity to modify the form structure.
+        pre_form_class_prepare.send(
+            sender=self.__class__,
+            data=data,
+            files=files,
+            instance=instance,
+            initial=initial,
+            exclude=exclude,
+            form_fields=form_fields,
+        )
+
         form_name = f"{self.name.title().replace('_', '')}Form"
         form_class: Type[BaseRecordForm] = type(
             form_name,
@@ -608,6 +621,19 @@ class BaseForm(FlexibleBaseModel):
                 ),
                 **form_fields,
             },
+        )
+
+        # Send a signal before preparing the form class to give receivers an
+        # opportunity to modify the form class after creation.
+        post_form_class_prepare.send(
+            sender=self.__class__,
+            data=data,
+            files=files,
+            instance=instance,
+            initial=initial,
+            exclude=exclude,
+            form_fields=form_fields,
+            form_class=form_class,
         )
 
         initial = {"form": self, **(initial or {})}

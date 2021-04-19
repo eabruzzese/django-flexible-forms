@@ -75,6 +75,7 @@ class BaseRecordForm(forms.ModelForm):
             try:
                 if data is not None:
                     data[field_name] = field._value  # type: ignore
+                initial[field_name] = field._value  # type: ignore
             except (AttributeError, KeyError):
                 continue
 
@@ -160,6 +161,12 @@ class BaseRecordForm(forms.ModelForm):
             self.files[field_name] = value
         else:
             self.data[field_name] = value
+
+        # Clear the changed_data cached_property.
+        try:
+            del self.changed_data
+        except AttributeError:
+            pass
 
     def full_clean(self) -> None:
         """Perform a full clean of the form.
