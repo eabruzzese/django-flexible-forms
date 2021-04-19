@@ -1408,3 +1408,57 @@ class QuerysetAutocompleteSelectMultipleField(QuerysetAutocompleteSelectField):
 
     label = "Autocomplete Multiple (QuerySet)"
     form_widget_class = AutocompleteSelectMultiple
+
+
+class CompoundField(FieldType):
+
+    label = "Compound Field"
+
+    class CompoundValueField(form_fields.MultiValueField):
+        def compress(self, data_list: Any) -> Any:
+            if not data_list:
+                return None
+            compressed = dict(zip((f.name for f in self.fields), data_list))
+            return compressed
+
+    class CompoundValueWidget(form_widgets.MultiWidget):
+        template_name = "flexible_forms/widgets/compoundvaluewidget.html"
+
+        def decompress(self, value: Any) -> Optional[Any]:
+            if not value:
+                return [None for _ in self.widgets]
+            return [*value.values()]
+
+    form_field_class = CompoundValueField
+    form_widget_class = CompoundValueWidget
+    model_field_class = JSONField
+
+    def as_form_field(self, **form_field_options: Any) -> form_fields.Field:
+        field_type_options = self.field.field_type_options
+        field_class = self.field.__class__
+
+        subfields = []
+        for field_name, field_attrs in field_type_options.get('fields', {}).items():
+            field_instance = field_class(name=field_name, **field_attrs)
+            field = field_instance.as_form_field(self.record, self.field_values)
+            field.name = field_name
+            subfields.append(field)
+
+        form_field_options["fields"] = subfields
+
+        return super().as_form_field(**form_field_options)
+
+    def as_form_widget(self, **form_widget_options: Any) -> form_widgets.Widget:
+        field_type_options = self.field.field_type_options
+        field_class = self.field.__class__
+
+        subwidgets = []
+        for field_name, field_attrs in field_type_options.get('fields', {}).items():
+            field_instance = field_class(name=field_name, **field_attrs)
+            field = field_instance.as_form_field(self.record, self.field_values)
+            field.name = field_name
+            subwidgets.append(field.widget)
+
+        form_widget_options["widgets"] = subwidgets
+
+        return super().as_form_widget(**form_widget_options)

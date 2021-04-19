@@ -1,0 +1,8 @@
+{% spaceless %}
+    {% for widget in widget.subwidgets %}
+    <div class="fieldBox">
+        <label for="{{ widget.attrs.id }}">{{ widget.label }}</label>
+        {% include widget.template_name %}
+    </div>
+    {% endfor %}
+{% endspaceless %}
