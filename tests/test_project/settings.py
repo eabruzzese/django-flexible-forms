@@ -135,3 +135,5 @@ MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
 # Debug toolbar
 DEBUG_TOOLBAR_CONFIG = {"SHOW_TOOLBAR_CALLBACK": lambda _: True}
+
+DATA_UPLOAD_MAX_NUMBER_FIELDS = None
