@@ -524,6 +524,8 @@ class DateField(FieldType):
     label = "Date"
 
     form_field_class = form_fields.DateField
+    form_widget_class = form_widgets.DateInput
+    form_widget_options = {"attrs": {"type": "date"}}
     model_field_class = model_fields.DateField
 
 
@@ -533,6 +535,8 @@ class TimeField(FieldType):
     label = "Time"
 
     form_field_class = form_fields.TimeField
+    form_widget_class = form_widgets.TimeInput
+    form_widget_options = {"attrs": {"type": "time"}}
     model_field_class = model_fields.TimeField
 
 
