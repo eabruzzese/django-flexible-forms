@@ -182,7 +182,12 @@ class AutocompleteSelect(Select):
                 if v.startswith("{") and v.endswith("}"):
                     parsed_v = json.loads(v)
                 else:
-                    parsed_v = json.loads(stable_json({"id": v, "text": v, "value": v}))
+                    parsed_v = {"text": v, "value": v, "extra": {}}
+
+            # Ensure that the selected option has a JSON-serialized
+            # representation of itself in its "id" field.
+            parsed_v.pop("id", None)
+            parsed_v["id"] = stable_json(parsed_v)
 
             if parsed_v is not None:
                 parsed_value.append(parsed_v)

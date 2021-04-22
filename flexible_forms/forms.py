@@ -73,7 +73,7 @@ class BaseRecordForm(forms.ModelForm):
             if not hasattr(field, "_value"):
                 continue
             try:
-                if data is not None:
+                if data is not None and not data.get(field_name):
                     data[field_name] = field._value  # type: ignore
                 initial[field_name] = field._value  # type: ignore
             except (AttributeError, KeyError):
