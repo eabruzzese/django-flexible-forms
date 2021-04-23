@@ -32,6 +32,7 @@ class AutocompleteSelect(Select):
     def __init__(
         self,
         url: Optional[str] = None,
+        cacheable: bool = True,
         allow_freetext: bool = False,
         placeholder: Optional[str] = None,
         attrs: Optional[Dict[str, Any]] = None,
@@ -40,6 +41,7 @@ class AutocompleteSelect(Select):
     ) -> None:
         super().__init__(attrs=attrs, choices=choices)
         self.url = url
+        self.cacheable = cacheable
         self.allow_freetext = allow_freetext
         self.placeholder = placeholder or ""
 
@@ -119,7 +121,7 @@ class AutocompleteSelect(Select):
         attrs = super().build_attrs(base_attrs, extra_attrs=extra_attrs)
         return {
             **attrs,
-            "data-ajax--cache": "true",
+            "data-ajax--cache": json.dumps(self.cacheable),
             "data-ajax--delay": 250,
             "data-ajax--type": "GET",
             "data-ajax--url": self.url or "",

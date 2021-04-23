@@ -4,8 +4,10 @@
 
 import json
 import logging
+import time
 import urllib.parse as urlparse
 from functools import reduce
+from hashlib import md5
 from operator import add, ior
 from typing import (
     TYPE_CHECKING,
@@ -345,7 +347,8 @@ class FieldType(metaclass=FieldTypeMetaclass):
                     .lower()
                     .replace(" ", "_")
                 )
-                expression_context = {record_variable: self.record, **self.field_values}
+                expression_context = {
+                    record_variable: self.record, **self.field_values}
 
             # Evaluate the expression and set the attribute specified by
             # `self.attribute` to the value it returns.
@@ -565,6 +568,11 @@ class CheckboxField(FieldType):
 
     form_field_class = form_fields.BooleanField
     form_widget_class = form_widgets.CheckboxInput
+    form_widget_options = {
+        "attrs": {
+            "value": "true"
+        }
+    }
     model_field_class = model_fields.BooleanField
 
 
@@ -598,7 +606,8 @@ class YesNoUnknownRadioField(FieldType):
             ("None", "Unknown"),
         ),
         "coerce": lambda v: (
-            True if v in ("True", True) else False if v in ("False", False) else None
+            True if v in ("True", True) else False if v in (
+                "False", False) else None
         ),
     }
     form_widget_class = form_widgets.RadioSelect
@@ -636,7 +645,8 @@ class YesNoUnknownSelectField(FieldType):
             ("None", "Unknown"),
         ),
         "coerce": lambda v: (
-            True if v in ("True", True) else False if v in ("False", False) else None
+            True if v in ("True", True) else False if v in (
+                "False", False) else None
         ),
     }
     model_field_class = model_fields.BooleanField
@@ -950,8 +960,10 @@ class URLAutocompleteSelectField(BaseAutocompleteSelectField):
         raw_results = jp(mapping["root"], response_json, [])
         for raw_result in raw_results:
             result_text = str(jp(mapping["text"], raw_result))
-            result_value = jp(mapping["value"], raw_result, default=result_text)
-            result_extra = {k: jp(v, raw_result) for k, v in mapping["extra"].items()}
+            result_value = jp(mapping["value"],
+                              raw_result, default=result_text)
+            result_extra = {k: jp(v, raw_result)
+                            for k, v in mapping["extra"].items()}
 
             # If we're configured to search manually, skip results that don't
             # have the search term in the extracted text.
@@ -1161,7 +1173,8 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
             search_method = getattr(
                 self, f"_search_{connections[qs.db].vendor}", self._search_fallback
             )
-            qs = search_method(qs, search_fields=search_fields, search_term=search_term)
+            qs = search_method(qs, search_fields=search_fields,
+                               search_term=search_term)
 
         # Paginate the queryset before mapping, since we don't know how big the
         # queryset could be.
@@ -1173,7 +1186,8 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
         # Parse the search response and map each result to a Select2-compatible
         # dict with an "id" and a "text" property.
         for instance in raw_results:
-            results.append(self.result_from_instance(instance, mapping=mapping))
+            results.append(self.result_from_instance(
+                instance, mapping=mapping))
 
         return results, has_more
 
@@ -1197,11 +1211,13 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
                 continue
             expression_fields.update(get_expression_fields(expr))
 
-        instance_json = {f: getattr(instance, f, None) for f in expression_fields}
+        instance_json = {f: getattr(instance, f, None)
+                         for f in expression_fields}
 
         result_text = str(jp(mapping["text"], instance_json))
         result_value = jp(mapping["value"], instance_json, default=result_text)
-        result_extra = {k: jp(v, instance_json) for k, v in mapping["extra"].items()}
+        result_extra = {k: jp(v, instance_json)
+                        for k, v in mapping["extra"].items()}
 
         mapped_result = {
             "value": result_value,
@@ -1256,7 +1272,8 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
         for field_name in search_fields:
             strict_score_field = F(f"_{field_name}_strict_score")
             similarity_score_field = F(f"_{field_name}_similarity_score")
-            search_rank_fields.update([strict_score_field, similarity_score_field])
+            search_rank_fields.update(
+                [strict_score_field, similarity_score_field])
 
             # Annotate the queryset with "strict" and "similarity" scores for
             # each field.
@@ -1272,8 +1289,10 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
                 **{
                     strict_score_field.name: Case(
                         When(**{f"{field_name}__iexact": search_term, "then": 3}),
-                        When(**{f"{field_name}__istartswith": search_term, "then": 2}),
-                        When(**{f"{field_name}__icontains": search_term, "then": 1}),
+                        When(
+                            **{f"{field_name}__istartswith": search_term, "then": 2}),
+                        When(
+                            **{f"{field_name}__icontains": search_term, "then": 1}),
                         output_field=model_fields.IntegerField(),
                         default=0,
                     ),
@@ -1345,8 +1364,10 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
                 **{
                     strict_score_field.name: Case(
                         When(**{f"{field_name}__iexact": search_term, "then": 3}),
-                        When(**{f"{field_name}__istartswith": search_term, "then": 2}),
-                        When(**{f"{field_name}__icontains": search_term, "then": 1}),
+                        When(
+                            **{f"{field_name}__istartswith": search_term, "then": 2}),
+                        When(
+                            **{f"{field_name}__icontains": search_term, "then": 1}),
                         output_field=model_fields.IntegerField(),
                         default=0,
                     ),
