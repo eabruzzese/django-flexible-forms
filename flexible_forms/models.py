@@ -1257,7 +1257,7 @@ class BaseRecord(FlexibleBaseModel):
         if (
             not self._initialized
             or name
-            in frozenset([*self.__dict__.keys(), *self.__class__.__dict__.keys()])
+            in frozenset([*self.__dict__.keys(), *self.__class__.__dict__.keys(), 'pk'])
             or name.startswith("_")
         ):
             super().__setattr__(name, value)
