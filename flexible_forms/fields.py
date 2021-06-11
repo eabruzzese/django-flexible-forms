@@ -841,19 +841,18 @@ class BaseAutocompleteSelectField(FieldType):
             (record._meta.verbose_name or "record").lower().replace(" ", "_")
         )
 
-        render_context = {
-            "term": search_term,
-            "page": page,
-            "per_page": per_page,
-            "record": record,
-            record_variable: record,
-            **record._data,
-            **self.field_values,
-        }
-
         # Iterpolate the form_field_options using context from the current request.
         field_type_options = interpolate(
-            self.field.field_type_options, context=render_context
+            self.field.field_type_options,
+            context={
+                "term": search_term,
+                "page": page,
+                "per_page": per_page,
+                "record": record,
+                record_variable: record,
+                **record._data,
+                **self.field_values,
+            }
         )
 
         return self.get_results(
@@ -950,7 +949,7 @@ class URLAutocompleteSelectField(BaseAutocompleteSelectField):
             AutocompleteResultMapping,
             {**self.DEFAULT_MAPPING, **field_type_options.get("mapping", {})},
         )
-        search_manually: bool = "term" not in url.render_context
+        search_manually: bool = "term" not in url.__context__
 
         # Get the JSON response from the endpoint.
         response_json = self._get_json_response(request, url)

@@ -1,0 +1,12 @@
+.django-ace-editor {
+    position: relative;
+    display: inline-block;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 1px 0px 0 0px;
+    background-color: #f0f0f0;
+}
+
+.django-ace-widget > div {
+    position: relative !important;
+}

@@ -24,7 +24,7 @@ from django.db.backends.base.base import BaseDatabaseWrapper
 from django.template import Context, Template
 from django.template.base import VariableNode
 from jmespath.parser import Parser
-from simpleeval import DEFAULT_FUNCTIONS, DEFAULT_OPERATORS, SimpleEval
+from simpleeval import DEFAULT_FUNCTIONS, DEFAULT_OPERATORS, EvalWithCompoundTypes
 
 if TYPE_CHECKING:  # pragma: no cover
     from flexible_forms.models import (
@@ -70,7 +70,7 @@ def empty(value: Any) -> bool:
     return value is None
 
 
-class FormEvaluator(SimpleEval):
+class FormEvaluator(EvalWithCompoundTypes):
     """An evaluator subclass for evaluating form expressions."""
 
     OPERATORS = {
@@ -210,19 +210,28 @@ def _get_fields(
     return referenced_fields
 
 
+class NOT_PROVIDED:
+    """A proxy type for specifying that something was not defined.
+
+    Useful when None is a valid value.
+    """
+
+
 class RenderedString(str):
     """A string with an attribute containing the render context.
 
-    The render_context property will be a dict containing the keys of
-    the variables used to render the string (variables in the original
-    context that were not used to render the string will be excluded).
+    The __context__ property will be a dict containing the keys of the variables
+    used to render the string. Variables in the original context that were not
+    used to render the string will be excluded. Variables that were referenced
+    in the string but not provided in the context should use the NOT_PROVIDED
+    proxy value.
     """
 
-    render_context: Dict[str, Any]
+    __context__: Dict[str, Any]
 
 
 @singledispatch
-def interpolate(data: Any, context: Dict[str, Any]) -> Any:
+def interpolate(data: Any, context: Dict[str, Any], strict=True) -> Any:
     """Interpolate the given data using DTL.
 
     Handles (nested) dicts and lists and will interpolate strings containing DTL tokens.
@@ -230,6 +239,8 @@ def interpolate(data: Any, context: Dict[str, Any]) -> Any:
     Args:
         data: The data to be interpolated.
         context: The context with which to interpolate strings containing DTL tokens.
+        strict: When True, an exception will be raised if the data
+            references a variable that is not provided in the context.
 
     Returns:
         Any: The interpolated data.
@@ -239,7 +250,7 @@ def interpolate(data: Any, context: Dict[str, Any]) -> Any:
 
 
 @interpolate.register(str)
-def _interpolate_str(data: str, context: Dict[str, Any]) -> RenderedString:
+def _interpolate_str(data: str, context: Dict[str, Any], strict=True) -> RenderedString:
     """Handles interpolation of string values.
 
     Interpolates strings using the default Django Template Language engine.
@@ -249,7 +260,7 @@ def _interpolate_str(data: str, context: Dict[str, Any]) -> RenderedString:
         context: The context with which to interpolate strings containing DTL tokens.
 
     Returns:
-        RenderedString: The rendered string with a render_context property
+        RenderedString: The rendered string with a __context__ property
             containing the variables used in rendering.
     """
     # Render the given string as a Django template with the given context.
@@ -257,10 +268,9 @@ def _interpolate_str(data: str, context: Dict[str, Any]) -> RenderedString:
     template_context = Context(context, autoescape=False)
     rendered_string = RenderedString(template.render(template_context))
 
-    # Extract a list of variables used in rendering and create a dict of
-    # them and their values to return attached to the rendered string.
-    rendered_string.render_context = {
-        var: template_context.get(var)
+    # Extract a dict of variables used to render the string.
+    rendered_context = {
+        var: template_context.get(var, NOT_PROVIDED)
         for var in frozenset(
             v.filter_expression.var.lookups[0]
             for v in template.nodelist
@@ -268,11 +278,20 @@ def _interpolate_str(data: str, context: Dict[str, Any]) -> RenderedString:
         )
     }
 
+    # Attach the render context to the string.
+    rendered_string.__context__ = rendered_context
+
+    missing_variables = frozenset(k for k, v in rendered_context.items() if v is NOT_PROVIDED)
+    if strict and missing_variables:
+        raise LookupError(
+            f'The template references variables that were not in the context '
+            f'provided: {", ".join(missing_variables)}')
+
     return rendered_string
 
 
 @interpolate.register(dict)
-def _interpolate_dict(data: dict, context: Dict[str, Any]) -> dict:
+def _interpolate_dict(data: dict, context: Dict[str, Any], strict=True) -> dict:
     """Handles interpolation of dict values.
 
     Interpolates the values of the dict as appropriate (renders strings, or
@@ -285,11 +304,11 @@ def _interpolate_dict(data: dict, context: Dict[str, Any]) -> dict:
     Returns:
         dict: The interpolated dict.
     """
-    return {k: interpolate(v, context) for k, v in data.items()}
+    return {k: interpolate(v, context, strict) for k, v in data.items()}
 
 
 @interpolate.register(list)
-def _interpolate_list(data: list, context: Dict[str, Any]) -> list:
+def _interpolate_list(data: list, context: Dict[str, Any], strict=True) -> list:
     """Handles interpolation of list values.
 
     Interpolates the elements of the list as appropriate (renders strings, or
@@ -302,7 +321,7 @@ def _interpolate_list(data: list, context: Dict[str, Any]) -> list:
     Returns:
         list: The interpolated list.
     """
-    return [interpolate(v, context) for v in data]
+    return [interpolate(v, context, strict) for v in data]
 
 
 # Determine if the database support trigram similarity by checking for

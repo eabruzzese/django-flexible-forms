@@ -44,6 +44,7 @@ pytest-xdist = {extras = ["psutil"], version = "^2.1.0"}
 requests-mock = {extras = ["fixture"], version = "^1.8.0"}
 sphinx = "^3.2.1"
 sphinx-autoapi = "^1.5.0"
+django-ace = "^1.0.11"
 
 [tool.dephell.main]
 from = {format = "poetry", path = "pyproject.toml"}

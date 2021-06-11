@@ -3,6 +3,7 @@
 """Django admin configurations for flexible_forms."""
 
 import logging
+import json
 from typing import (
     Any,
     Dict,
@@ -34,6 +35,7 @@ from flexible_forms.models import (
     BaseForm,
     BaseRecord,
     FlexibleBaseModel,
+    JSONField
 )
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,41 @@ DEFAULT_FORMFIELD_OVERRIDES = cast(
     },
 )
 
+
+##
+# Ace editor support
+#
+# If the project has django_ace installed, we'll try to use it to render JSON
+# fields using a friendlier editor.
+#
+if "django_ace" in settings.INSTALLED_APPS:
+    from django_ace import AceWidget
+
+    class CodeEditorAdminWidget(AceWidget):
+        class Media:
+            css = {"all": ("flexible_forms/admin/code-editor-admin-widget.css",)}
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **{
+                "height": "auto",
+                "maxlines": "Infinity",
+                "toolbar": False,
+                **kwargs,
+            })
+
+        def format_value(self, value):
+            try:
+                return json.dumps(json.loads(value), indent=2, sort_keys=True)
+            except BaseException:
+                return super().format_value(value)
+
+
+    DEFAULT_FORMFIELD_OVERRIDES = {
+        **DEFAULT_FORMFIELD_OVERRIDES,
+        JSONField: {
+            "widget": CodeEditorAdminWidget(mode="json")
+        },
+    }
 
 class FlexibleAdminMixin:
     """An admin class mixin for flexible form models."""
@@ -124,6 +161,25 @@ class FieldsInline(FlexibleAdminMixin, StackedInline):
     classes = ("collapse",)
     model = BaseField
     extra = 1
+
+    fieldsets = (
+        (None, {
+            "fields": (
+                ("label", "field_type", "required"),
+            )
+        }),
+        ("ADVANCED FIELD OPTIONS", {
+            "classes": ("collapse",),
+            "fields": (
+                "name",
+                "help_text",
+                "label_suffix",
+                "field_type_options",
+                "form_field_options",
+                "form_widget_options"
+            )
+        })
+    )
 
     @property
     def fk_name(self) -> str:
@@ -298,7 +354,8 @@ class FormsAdmin(FlexibleAdminMixin, ModelAdmin):
                 type(
                     "FieldsInline",
                     (FieldsInline,),
-                    {"model": self.model._flexible_model_for(FieldsInline.model)},
+                    {"model": self.model._flexible_model_for(
+                        FieldsInline.model)},
                 ),
             ),
             cast(
@@ -306,7 +363,8 @@ class FormsAdmin(FlexibleAdminMixin, ModelAdmin):
                 type(
                     "FieldsetsInline",
                     (FieldsetsInline,),
-                    {"model": self.model._flexible_model_for(FieldsetsInline.model)},
+                    {"model": self.model._flexible_model_for(
+                        FieldsetsInline.model)},
                 ),
             ),
         )

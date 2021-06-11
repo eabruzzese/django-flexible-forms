@@ -1131,10 +1131,10 @@ class BaseRecord(FlexibleBaseModel):
     # association (which breaks if the instance is not fully initialized).
     _initialized: bool = False
 
-    # The __setattr__ proxy stores attribute updates in the _staged_changes
+    # The __setattr__ proxy stores attribute updates in the _unsaved_changes
     # dict until save() is called. This attempts to mirror the way vanilla
     # Django models work.
-    _staged_changes: Dict[str, Any]
+    _unsaved_changes: Dict[str, Any]
 
     class Meta:
         abstract = True
@@ -1158,7 +1158,7 @@ class BaseRecord(FlexibleBaseModel):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self._staged_changes = {}
+        self._unsaved_changes = {}
         self._initialized = True
 
     def as_django_form(self, *args: Any, **kwargs: Any) -> "BaseRecordForm":
@@ -1200,7 +1200,7 @@ class BaseRecord(FlexibleBaseModel):
             Dict[str, Any],
             ({a.field.name: a.value for a in self.attributes.all()} if self.pk else {}),
         )
-        staged_attributes = {k: v for k, v in self._staged_changes.items()}
+        staged_attributes = {k: v for k, v in self._unsaved_changes.items()}
 
         return {
             **initial_values,
@@ -1264,7 +1264,7 @@ class BaseRecord(FlexibleBaseModel):
             return
 
         RecordAttribute = cast(Any, self._flexible_model_for(BaseRecordAttribute))
-        self._staged_changes[name] = RecordAttribute(
+        self._unsaved_changes[name] = RecordAttribute(
             record=self,
             field=self._fields[name],
             value=value,
@@ -1287,7 +1287,7 @@ class BaseRecord(FlexibleBaseModel):
         super().save(*args, **kwargs)
 
         # If there are no attributes to update, return early.
-        if not self._staged_changes:
+        if not self._unsaved_changes:
             return
 
         # Upsert the record attributes.
@@ -1297,7 +1297,7 @@ class BaseRecord(FlexibleBaseModel):
         value_fields: Set[str] = set()
         update: List[BaseRecordAttribute] = []
         insert: List[BaseRecordAttribute] = []
-        for field_name, value in self._staged_changes.items():
+        for field_name, value in self._unsaved_changes.items():
             # Find the existing attribute object or create a new one.
             attribute = attribute_map.get(field_name) or RecordAttribute(
                 record=self,

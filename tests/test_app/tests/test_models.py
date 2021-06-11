@@ -420,13 +420,13 @@ def test_form_lifecycle() -> None:
     unpersisted_record = django_form.save(commit=False)
     cleaned_record_data = django_form.cleaned_data
     del cleaned_record_data[AppRecord.FlexibleMeta.form_field_name]
-    assert {**unpersisted_record._data, "uuid": None} == cleaned_record_data
+    assert {**unpersisted_record._data, "uuid": None, "form": unpersisted_record.form} == cleaned_record_data
     assert AppRecord.objects.count() == record_count
 
     # Saving the form with commit=True should produce the same result as
     # commit=False, but actually persist the changes to the database.
     persisted_record = django_form.save(commit=True)
-    assert {**persisted_record._data, "uuid": None} == cleaned_record_data
+    assert {**persisted_record._data, "uuid": None, "form": persisted_record.form} == cleaned_record_data
     assert AppRecord.objects.count() == record_count + 1
 
     # Recreating the form from the persisted record should produce a valid,
