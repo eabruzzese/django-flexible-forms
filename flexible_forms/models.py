@@ -3,6 +3,7 @@
 """Model definitions for the flexible_forms module."""
 
 import inspect
+import re
 import weakref
 from itertools import groupby
 from types import ModuleType
@@ -1242,6 +1243,24 @@ class BaseRecord(FlexibleBaseModel):
 
         if name in self._fields:
             return self._data[name]
+
+        # HACK: Choice fields usually add a get_FIELDNAME_display method, which
+        # we handle here by rendering the label from the value in _data.
+        display_method = re.match(r'^get_(?P<field_name>\w+)_display$', name)
+        if display_method:
+            def _get_choice_display(self_=self, display_method=display_method) -> Optional[str]:
+                field_name = display_method.group('field_name')
+
+                try:
+                    form_field = self_._fields[field_name].as_form_field(record=self_, field_values=self_._data)
+                    return next((label for value, label in form_field.choices if value == self_._data.get(field_name)), None)
+                except (KeyError, AttributeError) as ex:
+                    raise AttributeError(
+                        f"'{self_.__class__.__name__}' object has no attribute '{name}'"
+                    ) from ex
+
+            return _get_choice_display
+
 
         raise AttributeError(
             f"'{self.__class__.__name__}' object has no attribute '{name}'"
