@@ -55,6 +55,12 @@ class BaseRecordForm(forms.ModelForm):
             or (initial or {}).get("form")
         )
 
+        if data is not None:
+            data["form"] = self.form
+
+        if instance is not None and data is not None:
+            data[instance.FlexibleMeta.form_field_name] = self.form
+
         # In some situations, the form might be a ModelChoiceIteratorValue
         # that needs to be unpacked.
         form_instance = getattr(self.form, "instance", None)
@@ -64,7 +70,7 @@ class BaseRecordForm(forms.ModelForm):
         # If no record instance was given, create a new (empty) one and use its
         # data for the initial form values.
         instance = instance or opts.model(form=self.form)
-        initial = {**instance._data, **(initial or {}), "form": self.form}
+        initial = {**instance._data, **(initial or {}), "form": self.form, instance.FlexibleMeta.form_field_name: self.form}
 
         # If any of the form fields have a "_value" attribute, use it in either
         # the data (if the form is bound) or the initial (if the form is
@@ -73,9 +79,11 @@ class BaseRecordForm(forms.ModelForm):
             if not hasattr(field, "_value"):
                 continue
             try:
-                if data is not None and not data.get(field_name):
-                    data[field_name] = field._value  # type: ignore
                 initial[field_name] = field._value  # type: ignore
+                if data is not None and data.get(field_name) is None:
+                    data[field_name] = field._value  # type: ignore
+                    # Unset the initial value so that the automatic value is detected as a change.
+                    initial.pop(field_name, None)
             except (AttributeError, KeyError):
                 continue
 
@@ -177,7 +185,34 @@ class BaseRecordForm(forms.ModelForm):
         """
         pre_form_clean.send(sender=self.__class__, form=self)
 
+        # Exclude form relationships that never change to avoid additional
+        # database calls during validation.
+        excluded_fields = {
+            name: self.fields.pop(name)
+            for name in frozenset.intersection(
+                frozenset(("form", self.instance.FlexibleMeta.form_field_name)),
+                frozenset(self.fields.keys())
+            )
+            if self.form
+        }
+
         super().full_clean()
+
+        # Restore excluded fields and assume that their values are clean.
+        for name, field in excluded_fields.items():
+            # Restore the field.
+            self.fields[name] = field
+
+            if name not in self.data:
+                continue
+
+            # Manually "clean" the field value by assuming it's valid.
+            value = self.data[name]
+            self.cleaned_data[name] = (
+                value.instance
+                if hasattr(value, "instance")
+                else value
+            )
 
         record_pk = self.instance.pk
         record_opts = self.instance._meta

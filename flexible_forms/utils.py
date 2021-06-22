@@ -350,3 +350,18 @@ def check_supports_pg_trgm(connection: BaseDatabaseWrapper) -> bool:
             return bool(cursor.fetchone())
     except DatabaseError:
         return False
+
+
+def collect_annotations(obj: Type) -> Dict[str, Type]:
+    """Collects annotations from an object hierarchy."""
+    annotations = getattr(obj, "__annotations__", {})
+    for base in obj.__bases__:
+        annotations = {
+            **annotations,
+            **collect_annotations(base)
+        }
+    return annotations
+
+
+def make_autocomplete_option(value: Dict[str, Any]) -> str:
+    pass

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import difflib
+from flexible_forms.utils import stable_json
 import json
 from unittest.util import safe_repr
 
@@ -111,8 +112,15 @@ def test_autocomplete_select_single_value_required() -> None:
     widget = AutocompleteSelect()
     widget.is_required = True
 
+    selected_value = {
+        "value": "1",
+        "text": "Test option",
+        "extra": {}
+    }
+    selected_option = stable_json({**selected_value, "id": stable_json(selected_value)})
+
     field_name = "test"
-    field_value = ['{"id":"1","text":"Test option"}']
+    field_value = [selected_option]
 
     # The widget value is extracted from the submitted form data. It is always
     # a list of strings, where each string is a stable JSON representation of a
@@ -121,9 +129,9 @@ def test_autocomplete_select_single_value_required() -> None:
     widget_value = widget.value_from_datadict(
         data=form_data, files=None, name=field_name
     )
-    assert widget_value == '{"id": "1", "text": "Test option"}'
+    assert widget_value == selected_option
 
-    expected_html = """
+    expected_html = f"""
     <select
         class="admin-autocomplete"
         data-ajax--cache="true"
@@ -137,7 +145,7 @@ def test_autocomplete_select_single_value_required() -> None:
         data-tags="false"
         data-theme="admin-autocomplete"
         name="test">
-    <option selected value='{"id":"1","text":"Test option"}'>Test option</option>
+    <option selected value='{selected_option}'>Test option</option>
     </select>
     """
 
@@ -157,6 +165,12 @@ def test_autocomplete_select_single_value_freetext() -> None:
 
     field_name = "test"
     field_value = ["freetext option"]
+    selected_value = {
+        "text": "freetext option",
+        "value": "freetext option",
+        "extra": {}
+    }
+    selected_option = stable_json({**selected_value, "id": stable_json(selected_value)})
 
     # The widget value is extracted from the submitted form data. It is always
     # a list of strings, where each string is a stable JSON representation of a
@@ -165,12 +179,9 @@ def test_autocomplete_select_single_value_freetext() -> None:
     widget_value = widget.value_from_datadict(
         data=form_data, files=None, name=field_name
     )
-    assert (
-        widget_value
-        == '{"id": "freetext option", "text": "freetext option", "value": "freetext option"}'
-    )
+    assert widget_value == selected_option
 
-    expected_html = """
+    expected_html = f"""
     <select
         class="admin-autocomplete"
         data-ajax--cache="true"
@@ -184,7 +195,7 @@ def test_autocomplete_select_single_value_freetext() -> None:
         data-tags="true"
         data-theme="admin-autocomplete"
         name="test">
-    <option selected value='{"id":"freetext option","text":"freetext option","value":"freetext option"}'>freetext option</option>
+    <option selected value='{selected_option}'>freetext option</option>
     </select>
     """
 
@@ -215,7 +226,7 @@ def test_autocomplete_select_multiple_value_required() -> None:
     widget_value = widget.value_from_datadict(
         data=form_data, files=None, name=field_name
     )
-    assert widget_value == json.dumps(
+    assert widget_value == stable_json(
         [
             {"id": "1", "text": "Test option"},
             {"id": "2", "text": "Test option 2"},

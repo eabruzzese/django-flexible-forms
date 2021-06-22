@@ -2,9 +2,9 @@
 
 """Field definitions for the flexible_forms module."""
 
+from datetime import date, datetime
 import json
 import logging
-import time
 import urllib.parse as urlparse
 from functools import reduce
 from hashlib import md5
@@ -23,6 +23,7 @@ from typing import (
     cast,
 )
 from urllib.parse import urlencode
+from django.core.validators import BaseValidator, MaxValueValidator, MinValueValidator
 
 import requests
 import simpleeval
@@ -58,6 +59,7 @@ except ImportError:  # pragma: no cover
 from flexible_forms.utils import (
     RenderedString,
     check_supports_pg_trgm,
+    collect_annotations,
     evaluate_expression,
     get_expression_fields,
     interpolate,
@@ -231,7 +233,11 @@ class FieldType(metaclass=FieldTypeMetaclass):
         self.field_values = field_values or {}
         self.modifiers = modifiers
 
+        field_type = type(self)
+        declared_options = {**collect_annotations(field_type), **field_type.__dict__}
         for attr, value in field_type_options.items():
+            if attr not in declared_options:
+                raise AttributeError(f"Field type {type(self)} has no attribute {attr}.")
             setattr(self, attr, value)
 
     def as_form_field(self, **form_field_options: Any) -> form_fields.Field:
@@ -531,6 +537,41 @@ class DateField(FieldType):
     form_widget_options = {"attrs": {"type": "date"}}
     model_field_class = model_fields.DateField
 
+    # Field type options that dictate whether the collected date can be in the
+    # past or future (both true by default).
+    allow_past: bool = True
+    allow_future: bool = True
+
+    def as_form_field(self, **form_field_options: Any) -> form_fields.Field:
+        return super().as_form_field(**{
+            **form_field_options,
+            "validators": self._get_validators()
+        })
+
+    def as_form_widget(self, **form_widget_options: Any) -> form_widgets.Widget:
+        attrs = {**self.form_widget_options, **form_widget_options}.get("attrs", {})
+
+        if not self.allow_past:
+            attrs["min"] = date.today().isoformat()
+
+        if not self.allow_future:
+            attrs["max"] = date.today().isoformat()
+
+        return super().as_form_widget(**{
+            **form_widget_options,
+            "attrs": attrs
+        })
+
+    def _get_validators(self) -> Tuple[BaseValidator]:
+        validators = ()
+
+        if not self.allow_past:
+            validators = (*validators, MinValueValidator(limit_value=date.today))
+
+        if not self.allow_future:
+            validators = (*validators, MaxValueValidator(limit_value=date.today))
+
+        return validators
 
 class TimeField(FieldType):
     """A field for collecting time data."""
@@ -550,6 +591,42 @@ class DateTimeField(FieldType):
 
     form_field_class = form_fields.DateTimeField
     model_field_class = model_fields.DateTimeField
+
+    # Field type options that dictate whether the collected datetime can be in
+    # the past or future (both true by default).
+    allow_past = True
+    allow_future = True
+
+    def as_form_field(self, **form_field_options: Any) -> form_fields.Field:
+        return super().as_form_field(**{
+            **form_field_options,
+            "validators": self._get_validators()
+        })
+
+    def as_form_widget(self, **form_widget_options: Any) -> form_widgets.Widget:
+        attrs = form_widget_options.get("attrs", {})
+
+        if not self.allow_past:
+            attrs["min"] = datetime.now().isoformat()
+
+        if not self.allow_future:
+            attrs["max"] = datetime.now().isoformat()
+
+        return super().as_form_widget(**{
+            **form_widget_options,
+            "attrs": attrs
+        })
+
+    def _get_validators(self) -> Tuple[BaseValidator]:
+        validators = ()
+
+        if not self.allow_past:
+            validators = (*validators, MinValueValidator(limit_value=datetime.now))
+
+        if not self.allow_future:
+            validators = (*validators, MaxValueValidator(limit_value=datetime.now))
+
+        return validators
 
 
 class DurationField(FieldType):
@@ -769,6 +846,7 @@ class BaseAutocompleteSelectField(FieldType):
         "text": "text",
         "extra": {},
     }
+    mapping: AutocompleteResultMapping
 
     def as_form_widget(self, **form_widget_options: Any) -> form_widgets.Widget:
         """Build the autocomplete form widget.
@@ -901,6 +979,7 @@ class URLAutocompleteSelectField(BaseAutocompleteSelectField):
 
     # URL autocomplete-specific field type options.
     url: str
+    search_fields: List[str]
 
     def get_results(
         self,
@@ -1067,7 +1146,6 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
     label = "Autocomplete (QuerySet)"
 
     model: str
-    mapping: AutocompleteResultMapping
     search_fields: List[str]
     filter: Dict[str, Any]
     exclude: Dict[str, Any]

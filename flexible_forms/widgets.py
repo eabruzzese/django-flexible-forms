@@ -184,12 +184,8 @@ class AutocompleteSelect(Select):
                 if v.startswith("{") and v.endswith("}"):
                     parsed_v = json.loads(v)
                 else:
-                    parsed_v = {"text": v, "value": v, "extra": {}}
-
-            # Ensure that the selected option has a JSON-serialized
-            # representation of itself in its "id" field.
-            parsed_v.pop("id", None)
-            parsed_v["id"] = stable_json(parsed_v)
+                    freetext_option = {"text": v, "value": v, "extra": {}}
+                    parsed_v = {**freetext_option, "id": stable_json(freetext_option)}
 
             if parsed_v is not None:
                 parsed_value.append(parsed_v)
@@ -201,7 +197,7 @@ class AutocompleteSelect(Select):
             else parsed_value
         )
 
-        return json.dumps(final_value)
+        return stable_json(final_value)
 
     def format_value(self, value: Any) -> Any:
         """Format a value for rendering in a widget template.

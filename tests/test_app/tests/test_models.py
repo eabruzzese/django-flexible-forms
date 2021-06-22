@@ -143,35 +143,38 @@ def test_field_modifier() -> None:
     with pytest.raises(ValidationError) as ex:
         modifier.expression = "does_not_exist == 1"
         modifier.clean()
+    error_message = str(ex.value.messages[0])
 
     # The validation message should tell the user what's wrong, and include the
     # name of the invalid variable as well as a list of valid ones.
-    assert "no field with that name exists" in str(ex)
-    assert "does_not_exist" in str(ex)
-    assert ", ".join([field_1.name, field_2.name]) in str(ex)
+    assert "no field with that name exists" in error_message
+    assert "does_not_exist" in error_message
+    assert ", ".join([field_1.name, field_2.name]) in error_message
 
     # Field modifiers that reference functions that don't exist should raise a
     # ValidationError.
     with pytest.raises(ValidationError) as ex:
         modifier.expression = "does_not_exist()"
         modifier.clean()
+    error_message = str(ex.value.messages[0])
 
     # The validation message should tell the user what's wrong, and include the
     # name of the invalid function as well as a list of valid ones.
-    assert "that function does not exist" in str(ex)
-    assert "does_not_exist" in str(ex)
-    assert ", ".join(FormEvaluator.FUNCTIONS.keys()) in str(ex)
+    assert "that function does not exist" in error_message
+    assert "does_not_exist" in error_message
+    assert ", ".join(FormEvaluator.FUNCTIONS.keys()) in error_message
 
     # Field modifiers that encounter other errors (like TypeErrors for
     # comparisons) should raise a ValidationError.
     with pytest.raises(ValidationError) as ex:
         modifier.expression = "'string' > 1"
         modifier.clean()
+    error_message = str(ex.value.messages[0])
 
     # The validation message should tell the user what's wrong, and include the
     # exception message.
-    assert "'>' not supported between instances of 'str' and 'int'" in str(ex)
-    assert "expression is invalid" in str(ex)
+    assert "'>' not supported between instances of 'str' and 'int'" in str(ex.value.messages)
+    assert "expression is invalid" in error_message
 
 
 @pytest.mark.django_db(transaction=True)
@@ -419,7 +422,6 @@ def test_form_lifecycle() -> None:
     record_count = AppRecord.objects.count()
     unpersisted_record = django_form.save(commit=False)
     cleaned_record_data = django_form.cleaned_data
-    del cleaned_record_data[AppRecord.FlexibleMeta.form_field_name]
     assert {**unpersisted_record._data, "uuid": None, "form": unpersisted_record.form} == cleaned_record_data
     assert AppRecord.objects.count() == record_count
 
@@ -435,7 +437,7 @@ def test_form_lifecycle() -> None:
     assert same_form.initial == {
         **persisted_record._data,
         "form": persisted_record.form,
-        "app_form": persisted_record.app_form_id,
+        "app_form": persisted_record.app_form,
         "id": persisted_record.id,
         "uuid": persisted_record.uuid,
     }
@@ -598,23 +600,20 @@ def test_record_queries(django_assert_num_queries) -> None:
             assert record._data != {}
 
     # Validating an existing record against its Django form with no changes
-    # should require only the queries needed to validate that the form is
-    # still a valid Form instance.
-    with django_assert_num_queries(2):
+    # should require no additional queries.
+    with django_assert_num_queries(0):
         record = records[0]
         django_form = record.form.as_django_form(data={}, instance=record)
         assert django_form.is_valid(), django_form.errors
 
     # Updating a record using a Django form should require these queries:
     #
-    #   * Two SELECTs as part of form validation, both used to check that the
-    #     value of the form field is valid.
     #   * A SAVEPOINT query before saving the model.
     #   * A single query to update the Record itself.
     #   * A single bulk_update query to update the attributes that have changed.
     #   * A RELEASE SAVEPOINT query after all of the queries have been executed.
     #
-    with django_assert_num_queries(6):
+    with django_assert_num_queries(4):
         record = records[1]
         new_record_values = {
             f"{SingleLineTextField.name}_field": "new_value",

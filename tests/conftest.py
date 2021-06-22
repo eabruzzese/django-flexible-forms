@@ -2,6 +2,8 @@
 
 """Pytest fixtures and configuration."""
 
+from flexible_forms.utils import stable_json
+from flexible_forms.fields import AutocompleteJSONField
 import json
 import uuid
 from contextlib import _GeneratorContextManager, contextmanager
@@ -225,14 +227,14 @@ def duration_strategy() -> st.SearchStrategy[timedelta]:
 @st.composite
 def json_strategy(
     draw: Any,
-    min_size=None,
+    min_size=0,
     allow_zero=True,
     allow_none=True,
     allow_bool=True,
-    allow_nan=True,
-    allow_infinity=True,
+    allow_nan=False,
+    allow_infinity=False,
 ) -> st.SearchStrategy[Any]:
-    strategies = st.text(printable, min_size=min_size) | st.floats(
+    strategies = st.text(printable, min_size=min_size) | st.integers(min_value=int(not allow_zero)) | st.floats(
         allow_nan=allow_nan,
         allow_infinity=allow_infinity,
         min_value=float(not allow_zero),
@@ -275,6 +277,26 @@ def json_field_strategy(field: forms.JSONField) -> str:
         )
 
     return _json_field_strategy()
+
+
+def autocomplete_json_field_strategy(field: AutocompleteJSONField) -> str:
+    @st.composite
+    def _autocomplete_json_field_strategy(draw: Any, field=field) -> st.SearchStrategy[str]:
+        option = {
+            "text": draw(st.text(printable, min_size=int(field.required))),
+            "value": draw(st.text(printable, min_size=int(field.required)) | st.floats(
+                allow_nan=False,
+                allow_infinity=False,
+                min_value=int(field.required)
+            ) | st.integers(min_value=0)),
+            "extra": {
+                "stuff": draw(json_strategy())
+            }
+        }
+
+        return stable_json({**option, "id": stable_json(option)})
+
+    return _autocomplete_json_field_strategy()
 
 
 @pytest.fixture(scope="session")
@@ -336,6 +358,7 @@ def _initialize_hypothesis() -> None:
         register_field_strategy(forms.ImageField, image_strategy())
 
         _global_field_lookup[forms.JSONField] = json_field_strategy
+        _global_field_lookup[AutocompleteJSONField] = autocomplete_json_field_strategy
     except InvalidArgument:
         pass
 
