@@ -19,6 +19,7 @@ jobs:
         python-version: [3.6, 3.7, 3.8]
         poetry-version: [1.0.10]
         cache-buster: [0]
+      fail-fast: false
     name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     steps:
