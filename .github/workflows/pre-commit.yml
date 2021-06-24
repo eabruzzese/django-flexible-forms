@@ -10,7 +10,7 @@ jobs:
   pre-commit:
     strategy:
       matrix:
-        poetry-version: [1.0.10]
+        poetry-version: [1.1.6]
         cache-buster: [0]
     runs-on: ubuntu-latest
     steps:
