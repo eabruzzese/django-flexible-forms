@@ -164,7 +164,7 @@ class BaseRecordForm(forms.ModelForm):
 
         # Hide and disable the form input if the BaseRecord is already persisted
         # with a relationship to its BaseForm.
-        if form is not None:
+        if form is not None and form_field_name in self.fields:
             form_field = self.fields[form_field_name]
             form_field.widget = HiddenInput()
             form_field.disabled = instance.pk and getattr(
