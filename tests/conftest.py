@@ -2,8 +2,6 @@
 
 """Pytest fixtures and configuration."""
 
-from flexible_forms.utils import stable_json
-from flexible_forms.fields import AutocompleteJSONField
 import json
 import uuid
 from contextlib import _GeneratorContextManager, contextmanager
@@ -34,6 +32,9 @@ from hypothesis.errors import InvalidArgument
 from hypothesis.extra.django import register_field_strategy
 from hypothesis.extra.django._fields import _global_field_lookup
 from PIL import Image
+
+from flexible_forms.fields import AutocompleteJSONField
+from flexible_forms.utils import stable_json
 
 T = TypeVar("T")
 Fixture = Generator[T, None, None]
@@ -234,10 +235,14 @@ def json_strategy(
     allow_nan=False,
     allow_infinity=False,
 ) -> st.SearchStrategy[Any]:
-    strategies = st.text(printable, min_size=min_size) | st.integers(min_value=int(not allow_zero)) | st.floats(
-        allow_nan=allow_nan,
-        allow_infinity=allow_infinity,
-        min_value=float(not allow_zero),
+    strategies = (
+        st.text(printable, min_size=min_size)
+        | st.integers(min_value=int(not allow_zero))
+        | st.floats(
+            allow_nan=allow_nan,
+            allow_infinity=allow_infinity,
+            min_value=float(not allow_zero),
+        )
     )
 
     if allow_bool:
@@ -269,7 +274,9 @@ def json_field_strategy(field: forms.JSONField) -> str:
             )
         )
 
-        if getattr(field.widget, "allow_multiple_selected", False) and not isinstance(value, list):
+        if getattr(field.widget, "allow_multiple_selected", False) and not isinstance(
+            value, list
+        ):
             value = [value]
 
         return json.dumps(
@@ -281,17 +288,19 @@ def json_field_strategy(field: forms.JSONField) -> str:
 
 def autocomplete_json_field_strategy(field: AutocompleteJSONField) -> str:
     @st.composite
-    def _autocomplete_json_field_strategy(draw: Any, field=field) -> st.SearchStrategy[str]:
+    def _autocomplete_json_field_strategy(
+        draw: Any, field=field
+    ) -> st.SearchStrategy[str]:
         option = {
             "text": draw(st.text(printable, min_size=int(field.required))),
-            "value": draw(st.text(printable, min_size=int(field.required)) | st.floats(
-                allow_nan=False,
-                allow_infinity=False,
-                min_value=int(field.required)
-            ) | st.integers(min_value=0)),
-            "extra": {
-                "stuff": draw(json_strategy())
-            }
+            "value": draw(
+                st.text(printable, min_size=int(field.required))
+                | st.floats(
+                    allow_nan=False, allow_infinity=False, min_value=int(field.required)
+                )
+                | st.integers(min_value=0)
+            ),
+            "extra": {"stuff": draw(json_strategy())},
         }
 
         return stable_json({**option, "id": stable_json(option)})

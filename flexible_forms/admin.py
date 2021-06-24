@@ -2,8 +2,8 @@
 
 """Django admin configurations for flexible_forms."""
 
-import logging
 import json
+import logging
 from typing import (
     Any,
     Dict,
@@ -22,7 +22,7 @@ from django.conf import settings
 from django.contrib import admin
 from django.contrib.admin.options import InlineModelAdmin
 from django.db import models
-from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+from django.http import HttpRequest
 from django.urls import reverse
 from django.utils.safestring import SafeText, mark_safe
 
@@ -35,7 +35,7 @@ from flexible_forms.models import (
     BaseForm,
     BaseRecord,
     FlexibleBaseModel,
-    JSONField
+    JSONField,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,30 +80,45 @@ if "django_ace" in settings.INSTALLED_APPS:
     from django_ace import AceWidget
 
     class CodeEditorAdminWidget(AceWidget):
+        """An admin widget for editing code.
+
+        Powered by Ace editor.
+        """
+
         class Media:
             css = {"all": ("flexible_forms/admin/code-editor-admin-widget.css",)}
 
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **{
-                "height": "auto",
-                "maxlines": "Infinity",
-                "toolbar": False,
-                **kwargs,
-            })
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(
+                *args,
+                **{
+                    "height": "auto",
+                    "maxlines": "Infinity",
+                    "toolbar": False,
+                    **kwargs,
+                },
+            )
 
-        def format_value(self, value):
+        def format_value(self, value: Any) -> Optional[str]:
+            """Format the given value for use by the widget.
+
+            Args:
+                value: The value to format.
+
+            Returns:
+                str: The formatted value.
+            """
             try:
                 return json.dumps(json.loads(value), indent=2, sort_keys=True)
             except BaseException:
-                return super().format_value(value)
+                return cast(Optional[str], super().format_value(value))
 
-
+    # Use the code editor for JSONField fields.
     DEFAULT_FORMFIELD_OVERRIDES = {
         **DEFAULT_FORMFIELD_OVERRIDES,
-        JSONField: {
-            "widget": CodeEditorAdminWidget(mode="json")
-        },
+        JSONField: {"widget": CodeEditorAdminWidget(mode="json")},
     }
+
 
 class FlexibleAdminMixin:
     """An admin class mixin for flexible form models."""
@@ -163,22 +178,21 @@ class FieldsInline(FlexibleAdminMixin, StackedInline):
     extra = 1
 
     fieldsets = (
-        (None, {
-            "fields": (
-                ("label", "field_type", "required"),
-            )
-        }),
-        ("ADVANCED FIELD OPTIONS", {
-            "classes": ("collapse",),
-            "fields": (
-                "name",
-                "help_text",
-                "label_suffix",
-                "field_type_options",
-                "form_field_options",
-                "form_widget_options"
-            )
-        })
+        (None, {"fields": (("label", "field_type", "required"),)}),
+        (
+            "ADVANCED FIELD OPTIONS",
+            {
+                "classes": ("collapse",),
+                "fields": (
+                    "name",
+                    "help_text",
+                    "label_suffix",
+                    "field_type_options",
+                    "form_field_options",
+                    "form_widget_options",
+                ),
+            },
+        ),
     )
 
     @property
@@ -354,8 +368,7 @@ class FormsAdmin(FlexibleAdminMixin, ModelAdmin):
                 type(
                     "FieldsInline",
                     (FieldsInline,),
-                    {"model": self.model._flexible_model_for(
-                        FieldsInline.model)},
+                    {"model": self.model._flexible_model_for(FieldsInline.model)},
                 ),
             ),
             cast(
@@ -363,8 +376,7 @@ class FormsAdmin(FlexibleAdminMixin, ModelAdmin):
                 type(
                     "FieldsetsInline",
                     (FieldsetsInline,),
-                    {"model": self.model._flexible_model_for(
-                        FieldsetsInline.model)},
+                    {"model": self.model._flexible_model_for(FieldsetsInline.model)},
                 ),
             ),
         )
@@ -432,12 +444,13 @@ class FormsAdmin(FlexibleAdminMixin, ModelAdmin):
         Record = form._flexible_model_for(BaseRecord)
         app_label = Record._meta.app_label  # noqa: WPS437
         model_name = Record._meta.model_name  # noqa: WPS437
+        form_field_name = Record.FlexibleMeta.form_field_name
 
         add_url = (
             reverse(
                 f"admin:{app_label}_{model_name}_add",
             )
-            + f"?form_id={form.pk}"
+            + f"?{form_field_name}={form.pk}"
         )
 
         return mark_safe(
@@ -583,44 +596,25 @@ class RecordsAdmin(FlexibleAdminMixin, ModelAdmin):
                 )
             )
 
+        record_model = self.model._flexible_model_for(BaseRecord)
+        form_model = self.model._flexible_model_for(BaseForm)
+        form_field_name = record_model.FlexibleMeta.form_field_name
+        form_pk = request.GET.get(form_field_name)
+
+        if form_pk:
+            form = cast(BaseForm, form_model.objects.get(pk=form_pk))
+            initial_data: Dict[str, Any] = {
+                **{
+                    cast(str, f.name): request.GET.get(cast(str, f.name))
+                    for f in (*record_model._meta.get_fields(), *form.fields.all())
+                },
+                form_field_name: form,
+            }
+            return type(form.as_django_form(data=initial_data, initial=initial_data))
+
+        # If no object was given and no form was specified, return a vanilla
+        # model form for a BaseRecord.
         return cast(
             Type[forms.BaseForm],
             super().get_form(request, obj, *args, **kwargs),
         )
-
-    def add_view(
-        self,
-        request: HttpRequest,
-        *args: Any,
-        **kwargs: Any,
-    ) -> HttpResponse:
-        """Overrides add_view to create a dynamic record.
-
-        Uses the query parameters to create a new record of the given type.
-
-        Args:
-            request: The current HTTP request.
-            args: (Passed to super)
-            kwargs: (Passed to super)
-
-        Returns:
-            HttpResponse: The HTTP response with the rendered view.
-        """
-        form_id = request.GET.get("form_id")
-        Form = self.model._flexible_model_for(BaseForm)
-
-        if form_id:
-            record = self.model._default_manager.create(
-                form=Form._default_manager.get(pk=form_id),
-            )
-
-            app_label = record._meta.app_label  # noqa: WPS437
-            model_name = record._meta.model_name  # noqa: WPS437
-            change_url = reverse(
-                f"admin:{app_label}_{model_name}_change",
-                args=(record.pk,),
-            )
-
-            return HttpResponseRedirect(change_url)
-
-        return cast(HttpResponse, super().add_view(request, *args, **kwargs))

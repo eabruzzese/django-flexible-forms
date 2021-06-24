@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
 import difflib
-from flexible_forms.utils import stable_json
-import json
 from unittest.util import safe_repr
 
 import pytest
@@ -9,6 +7,7 @@ from django.forms.renderers import DjangoTemplates, Jinja2
 from django.test.html import parse_html
 from django.utils.datastructures import MultiValueDict
 
+from flexible_forms.utils import stable_json
 from flexible_forms.widgets import (
     AutocompleteSelect,
     AutocompleteSelectMultiple,
@@ -112,11 +111,7 @@ def test_autocomplete_select_single_value_required() -> None:
     widget = AutocompleteSelect()
     widget.is_required = True
 
-    selected_value = {
-        "value": "1",
-        "text": "Test option",
-        "extra": {}
-    }
+    selected_value = {"value": "1", "text": "Test option", "extra": {}}
     selected_option = stable_json({**selected_value, "id": stable_json(selected_value)})
 
     field_name = "test"
@@ -168,7 +163,7 @@ def test_autocomplete_select_single_value_freetext() -> None:
     selected_value = {
         "text": "freetext option",
         "value": "freetext option",
-        "extra": {}
+        "extra": {},
     }
     selected_option = stable_json({**selected_value, "id": stable_json(selected_value)})
 

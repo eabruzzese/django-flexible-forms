@@ -4,10 +4,10 @@
 import datetime
 from typing import Any, Dict, Mapping, Optional, cast
 
+import django
 from django import forms
 from django.core.files.base import File
 from django.forms.models import ALL_FIELDS
-from django.forms.widgets import HiddenInput
 
 from flexible_forms.cache import cache
 from flexible_forms.models import BaseForm, BaseRecord
@@ -19,6 +19,9 @@ from flexible_forms.signals import (
     pre_form_init,
     pre_form_save,
 )
+
+if django.VERSION >= (3, 1):  # pragma: no-cover
+    from django.forms.models import ModelChoiceIteratorValue  # type: ignore
 
 
 class BaseRecordForm(forms.ModelForm):
@@ -47,45 +50,100 @@ class BaseRecordForm(forms.ModelForm):
         data = data.copy() if data is not None else None
         files = files.copy() if files is not None else None
 
-        # Extract the form definition from the given data, the instance, or the
-        # initial values.
-        self.form = (
-            (data or {}).get("form")
-            or getattr(instance, "form", None)
-            or (initial or {}).get("form")
-        )
+        # If we don't have an instance (e.g., we're adding a new record), we try
+        # to derive the BaseForm from the given parameters.
+        #
+        # If we can't derive a BaseForm (e.g. we're totally unbound and there's
+        # no BaseForm identifier in the initial data) then we behave as a
+        # totally normal ModelForm, only presenting the BaseForm's concrete
+        # attributes.
+        RecordModel = opts.model
+        FormModel = RecordModel._flexible_model_for(BaseForm)
+        form_field_name = RecordModel.FlexibleMeta.form_field_name
 
-        if data is not None:
-            data["form"] = self.form
+        # Try to get some kind of specifier for the BaseForm we should use.
+        #
+        #   1. Look in the data parameter to see if one was sumbitted with the
+        #      form data.
+        #   2. If it wasn't in the form data, see if the instance is related to
+        #      a BaseForm.
+        #   3. Look in the initial parameter to see if we were given a BaseForm
+        #      either manually or by the as_django_form() method on the BaseForm
+        #      model.
+        #
+        # If all of these fail, we'll fall back to behaving as a normal
+        # ModelForm: the form will only have fields for the direct model
+        # attributes of a BaseRecord until it has a relationship to a BaseForm.
+        #
+        form = (data or {}).get(form_field_name)
+        form = form or getattr(instance, form_field_name, None)
+        form = form or (initial or {}).get(form_field_name)
 
-        if instance is not None and data is not None:
-            data[instance.FlexibleMeta.form_field_name] = self.form
+        # Depending on how the RecordForm is being created, the form might be:
+        #
+        #   3. A ModelChoiceIteratorValue (Django 3.1+), which has an "instance"
+        #      property containing the form instance that we unpack.
+        #   4. A primary key value (an int or a string) that we use to query
+        #      for the BaseForm.
+        #   1. None or a BaseForm instance, in which case we do nothing.
+        if django.VERSION >= (3, 1) and isinstance(form, ModelChoiceIteratorValue):
+            form = form.instance
+        if isinstance(form, int) or (isinstance(form, str) and form.isdigit()):
+            form = FormModel.objects.get(pk=form)
 
-        # In some situations, the form might be a ModelChoiceIteratorValue
-        # that needs to be unpacked.
-        form_instance = getattr(self.form, "instance", None)
-        if isinstance(form_instance, BaseForm):
-            self.form = form_instance
+        # If the form is bound, make sure that data holds a reference to the
+        # form object.
+        is_bound = data is not None or files is not None
+        if is_bound:
+            data = {
+                **(data or {}),
+                form_field_name: form,
+            }
 
-        # If no record instance was given, create a new (empty) one and use its
-        # data for the initial form values.
-        instance = instance or opts.model(form=self.form)
-        initial = {**instance._data, **(initial or {}), "form": self.form, instance.FlexibleMeta.form_field_name: self.form}
+        # Inject the instance's _data (form field values) into the initial dict.
+        # If we weren't given an instance, we make a new one (but don't persist
+        # it) for consistency.
+        instance = instance or opts.model(form=form)
+        initial = {
+            **instance._data,
+            **(initial or {}),
+            form_field_name: form,
+        }
 
         # If any of the form fields have a "_value" attribute, use it in either
-        # the data (if the form is bound) or the initial (if the form is
+        # the data (if the form is bound) and/or the initial (if the form is
         # unbound).
-        for field_name, field in self.base_fields.items():
-            if not hasattr(field, "_value"):
-                continue
+        modified_fields = {
+            k: v for k, v in self.base_fields.items() if hasattr(v, "_value")
+        }
+        for field_name, field in modified_fields.items():
             try:
-                initial[field_name] = field._value  # type: ignore
-                if data is not None and data.get(field_name) is None:
-                    data[field_name] = field._value  # type: ignore
-                    # Unset the initial value so that the automatic value is detected as a change.
-                    initial.pop(field_name, None)
-            except (AttributeError, KeyError):
+                field_value = field._value  # type: ignore
+            except AttributeError:
                 continue
+
+            # If the field already has a value, don't try to overwrite it.
+            if field_name in {**(data or {}), **(files or {})}:
+                continue
+
+            # Set the initial value.
+            initial[field_name] = field_value
+
+            # For unbound forms, data and files are both None, so we can't set
+            # values in them and we continue on.
+            if not is_bound:
+                continue
+
+            # Set the appropriate data element (files for FileFields, data for
+            # everything else) to the field's new value.
+            if isinstance(field, forms.FileField):
+                files = {**(files or {}), field_name: field_value}
+            else:
+                data = {**(data or {}), field_name: field_value}
+
+            # Unset the initial value so that the automatically-set value is
+            # detected as a change when the form is saved.
+            initial.pop(field_name, None)
 
         # Emit a signal before initializing the form.
         pre_form_init.send(
@@ -97,84 +155,16 @@ class BaseRecordForm(forms.ModelForm):
             initial=initial,
         )
 
+        # Initialize the form as usual.
         super().__init__(
             data=data, files=files, instance=instance, initial=initial, **kwargs
         )
-
-        # If the record has a form associated already, don't allow it to be changed.
-        if self.form:
-            form_field_name = instance.FlexibleMeta.form_field_name
-            if form_field_name in self.fields:
-                self.fields[form_field_name].disabled = True
-                self.fields[form_field_name].widget = HiddenInput()
-            if "form" in self.fields:
-                self.fields["form"].disabled = True
-                self.fields["form"].widget = HiddenInput()
 
         # Emit a signal after initializing the form.
         post_form_init.send(
             sender=self.__class__,
             form=self,
         )
-
-    def get_value(self, field_name: str, raw: bool = False) -> Any:
-        """Return the value of the field with the given name.
-
-        If raw is specified, returns the value as-is with no cleaning performed.
-
-        Args:
-            field_name: The name of the field for which to return the value.
-            raw: Return the raw value from the data dict.
-
-        Returns:
-            Any: The value of the field.
-        """
-        field: forms.Field = self.fields[field_name]
-        field.widget = cast(forms.Widget, field.widget)
-
-        value = (
-            self.get_initial_for_field(field, field_name)
-            if field.disabled
-            else field.widget.value_from_datadict(
-                self.data, self.files, self.add_prefix(field_name)
-            )
-        )
-
-        # If raw was specified, return the value as-is.
-        if raw:
-            return value
-
-        # Attempt to clean the field value. This may throw a validation error.
-        if isinstance(field, forms.FileField):
-            initial = self.get_initial_for_field(field, field_name)
-            value = field.clean(value, initial)
-        else:
-            value = field.clean(value)
-
-        if hasattr(self, f"clean_{field_name}"):
-            value = getattr(self, f"clean_{field_name}")()
-
-        return value
-
-    def set_value(self, field_name: str, value: Any) -> None:
-        """Set the value of the field with the given name.
-
-        Args:
-            field_name: The name of the field for which to set the value.
-            value: The new value for the field.
-        """
-        field: forms.Field = self.fields[field_name]
-
-        if isinstance(field, forms.FileField):
-            self.files[field_name] = value
-        else:
-            self.data[field_name] = value
-
-        # Clear the changed_data cached_property.
-        try:
-            del self.changed_data
-        except AttributeError:
-            pass
 
     def full_clean(self) -> None:
         """Perform a full clean of the form.
@@ -185,34 +175,7 @@ class BaseRecordForm(forms.ModelForm):
         """
         pre_form_clean.send(sender=self.__class__, form=self)
 
-        # Exclude form relationships that never change to avoid additional
-        # database calls during validation.
-        excluded_fields = {
-            name: self.fields.pop(name)
-            for name in frozenset.intersection(
-                frozenset(("form", self.instance.FlexibleMeta.form_field_name)),
-                frozenset(self.fields.keys())
-            )
-            if self.form
-        }
-
         super().full_clean()
-
-        # Restore excluded fields and assume that their values are clean.
-        for name, field in excluded_fields.items():
-            # Restore the field.
-            self.fields[name] = field
-
-            if name not in self.data:
-                continue
-
-            # Manually "clean" the field value by assuming it's valid.
-            value = self.data[name]
-            self.cleaned_data[name] = (
-                value.instance
-                if hasattr(value, "instance")
-                else value
-            )
 
         record_pk = self.instance.pk
         record_opts = self.instance._meta

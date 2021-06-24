@@ -11,7 +11,6 @@ from typing import (
     Sequence,
     Tuple,
     Union,
-    cast,
 )
 
 from django.contrib.admin.widgets import AutocompleteMixin
@@ -192,7 +191,7 @@ class AutocompleteSelect(Select):
 
         # If only one value is expected, unwrap it from the parsed list.
         final_value = (
-            next(iter(cast(Iterable, parsed_value)), None)
+            next(iter(parsed_value), None)
             if not self.allow_multiple_selected
             else parsed_value
         )

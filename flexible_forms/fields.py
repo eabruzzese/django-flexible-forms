@@ -2,12 +2,11 @@
 
 """Field definitions for the flexible_forms module."""
 
-from datetime import date, datetime
 import json
 import logging
 import urllib.parse as urlparse
+from datetime import date, datetime
 from functools import reduce
-from hashlib import md5
 from operator import add, ior
 from typing import (
     TYPE_CHECKING,
@@ -23,7 +22,6 @@ from typing import (
     cast,
 )
 from urllib.parse import urlencode
-from django.core.validators import BaseValidator, MaxValueValidator, MinValueValidator
 
 import requests
 import simpleeval
@@ -31,6 +29,11 @@ from django.apps import apps
 from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
 from django.core.paginator import Paginator
+from django.core.validators import (
+    BaseValidator,
+    MaxValueValidator,
+    MinValueValidator,
+)
 from django.db import connections
 from django.db.models import Case, F, FileField, ImageField
 from django.db.models import Model as DjangoModel
@@ -50,10 +53,10 @@ from flexible_forms.widgets import (
 )
 
 try:
-    from django.db.models import JSONField  # type: ignore
+    from django.db.models import JSONField
     from django.forms import JSONField as JSONFormField
 except ImportError:  # pragma: no cover
-    from django.contrib.postgres.fields import JSONField
+    from django.contrib.postgres.fields import JSONField  # type: ignore
     from django.contrib.postgres.forms import JSONField as JSONFormField  # type: ignore
 
 from flexible_forms.utils import (
@@ -99,8 +102,13 @@ class FieldTypeOptions:
 class FieldTypeMetaclass(type):
     """A metaclass for handling FieldType configuration and registration."""
 
+    label: str
+
+    name: str
+    _meta: FieldTypeOptions
+
     def __new__(
-        cls,
+        cls: Type["FieldTypeMetaclass"],
         name: str,
         bases: Tuple[type, ...],
         attrs: Dict[str, Any],
@@ -130,7 +138,7 @@ class FieldTypeMetaclass(type):
         # Set the name from the class name if a name was not provided.
         attrs["name"] = attrs.get("name", name)
 
-        clsobj = super().__new__(cls, name, bases, attrs, **kwargs)  # type: ignore
+        clsobj = super().__new__(cls, name, bases, attrs, **kwargs)
 
         # Throw an error if a FieldType with the given name was already registered.
         if clsobj.name in FIELD_TYPES and not clsobj._meta.force_replacement:
@@ -140,9 +148,9 @@ class FieldTypeMetaclass(type):
 
         # Register the new field type with its class name (if it's not abstract).
         if not clsobj._meta.abstract:
-            FIELD_TYPES[name] = clsobj
+            FIELD_TYPES[name] = cast(Type[FieldType], clsobj)
 
-        return cast("FieldTypeMetaclass", clsobj)
+        return clsobj
 
 
 class FieldType(metaclass=FieldTypeMetaclass):
@@ -237,7 +245,9 @@ class FieldType(metaclass=FieldTypeMetaclass):
         declared_options = {**collect_annotations(field_type), **field_type.__dict__}
         for attr, value in field_type_options.items():
             if attr not in declared_options:
-                raise AttributeError(f"Field type {type(self)} has no attribute {attr}.")
+                raise AttributeError(
+                    f"Field type {type(self)} has no attribute {attr}."
+                )
             setattr(self, attr, value)
 
     def as_form_field(self, **form_field_options: Any) -> form_fields.Field:
@@ -353,8 +363,7 @@ class FieldType(metaclass=FieldTypeMetaclass):
                     .lower()
                     .replace(" ", "_")
                 )
-                expression_context = {
-                    record_variable: self.record, **self.field_values}
+                expression_context = {record_variable: self.record, **self.field_values}
 
             # Evaluate the expression and set the attribute specified by
             # `self.attribute` to the value it returns.
@@ -543,12 +552,33 @@ class DateField(FieldType):
     allow_future: bool = True
 
     def as_form_field(self, **form_field_options: Any) -> form_fields.Field:
-        return super().as_form_field(**{
-            **form_field_options,
-            "validators": self._get_validators()
-        })
+        """Return a configured form field.
+
+        Adds validators to handle past and future date limitations.
+
+        Args:
+            form_field_options: Additional kwargs passed to the Django form
+                field constructor.
+
+        Returns:
+            form_fields.Field: An instance of the form field.
+        """
+        return super().as_form_field(
+            **{**form_field_options, "validators": self._get_validators()}
+        )
 
     def as_form_widget(self, **form_widget_options: Any) -> form_widgets.Widget:
+        """Return an instance of the form widget for rendering.
+
+        Adds widget attributes to handle past and future date limitations.
+
+        Args:
+            form_widget_options: Additional kwargs passed to the Django form
+                widget constructor.
+
+        Returns:
+            form_widgets.Widget: The configured form widget for the field.
+        """
         attrs = {**self.form_widget_options, **form_widget_options}.get("attrs", {})
 
         if not self.allow_past:
@@ -557,13 +587,11 @@ class DateField(FieldType):
         if not self.allow_future:
             attrs["max"] = date.today().isoformat()
 
-        return super().as_form_widget(**{
-            **form_widget_options,
-            "attrs": attrs
-        })
+        return super().as_form_widget(**{**form_widget_options, "attrs": attrs})
 
-    def _get_validators(self) -> Tuple[BaseValidator]:
-        validators = ()
+    def _get_validators(self) -> Tuple[BaseValidator, ...]:
+        """Return validators for handling past and future date limitations."""
+        validators = cast(Tuple[BaseValidator, ...], ())
 
         if not self.allow_past:
             validators = (*validators, MinValueValidator(limit_value=date.today))
@@ -572,6 +600,7 @@ class DateField(FieldType):
             validators = (*validators, MaxValueValidator(limit_value=date.today))
 
         return validators
+
 
 class TimeField(FieldType):
     """A field for collecting time data."""
@@ -598,12 +627,33 @@ class DateTimeField(FieldType):
     allow_future = True
 
     def as_form_field(self, **form_field_options: Any) -> form_fields.Field:
-        return super().as_form_field(**{
-            **form_field_options,
-            "validators": self._get_validators()
-        })
+        """Return a configured form field.
+
+        Adds validators to handle past and future date limitations.
+
+        Args:
+            form_field_options: Additional kwargs passed to the Django form
+                field constructor.
+
+        Returns:
+            form_fields.Field: An instance of the form field.
+        """
+        return super().as_form_field(
+            **{**form_field_options, "validators": self._get_validators()}
+        )
 
     def as_form_widget(self, **form_widget_options: Any) -> form_widgets.Widget:
+        """Return an instance of the form widget for rendering.
+
+        Adds widget attributes to handle past and future date limitations.
+
+        Args:
+            form_widget_options: Additional kwargs passed to the Django form
+                widget constructor.
+
+        Returns:
+            form_widgets.Widget: The configured form widget for the field.
+        """
         attrs = form_widget_options.get("attrs", {})
 
         if not self.allow_past:
@@ -612,13 +662,11 @@ class DateTimeField(FieldType):
         if not self.allow_future:
             attrs["max"] = datetime.now().isoformat()
 
-        return super().as_form_widget(**{
-            **form_widget_options,
-            "attrs": attrs
-        })
+        return super().as_form_widget(**{**form_widget_options, "attrs": attrs})
 
-    def _get_validators(self) -> Tuple[BaseValidator]:
-        validators = ()
+    def _get_validators(self) -> Tuple[BaseValidator, ...]:
+        """Return validators for handling past and future date limitations."""
+        validators = cast(Tuple[BaseValidator, ...], ())
 
         if not self.allow_past:
             validators = (*validators, MinValueValidator(limit_value=datetime.now))
@@ -645,11 +693,7 @@ class CheckboxField(FieldType):
 
     form_field_class = form_fields.BooleanField
     form_widget_class = form_widgets.CheckboxInput
-    form_widget_options = {
-        "attrs": {
-            "value": "true"
-        }
-    }
+    form_widget_options = {"attrs": {"value": "true"}}
     model_field_class = model_fields.BooleanField
 
 
@@ -683,8 +727,7 @@ class YesNoUnknownRadioField(FieldType):
             ("None", "Unknown"),
         ),
         "coerce": lambda v: (
-            True if v in ("True", True) else False if v in (
-                "False", False) else None
+            True if v in ("True", True) else False if v in ("False", False) else None
         ),
     }
     form_widget_class = form_widgets.RadioSelect
@@ -722,8 +765,7 @@ class YesNoUnknownSelectField(FieldType):
             ("None", "Unknown"),
         ),
         "coerce": lambda v: (
-            True if v in ("True", True) else False if v in (
-                "False", False) else None
+            True if v in ("True", True) else False if v in ("False", False) else None
         ),
     }
     model_field_class = model_fields.BooleanField
@@ -930,7 +972,7 @@ class BaseAutocompleteSelectField(FieldType):
                 record_variable: record,
                 **record._data,
                 **self.field_values,
-            }
+            },
         )
 
         return self.get_results(
@@ -1038,10 +1080,8 @@ class URLAutocompleteSelectField(BaseAutocompleteSelectField):
         raw_results = jp(mapping["root"], response_json, [])
         for raw_result in raw_results:
             result_text = str(jp(mapping["text"], raw_result))
-            result_value = jp(mapping["value"],
-                              raw_result, default=result_text)
-            result_extra = {k: jp(v, raw_result)
-                            for k, v in mapping["extra"].items()}
+            result_value = jp(mapping["value"], raw_result, default=result_text)
+            result_extra = {k: jp(v, raw_result) for k, v in mapping["extra"].items()}
 
             # If we're configured to search manually, skip results that don't
             # have the search term in the extracted text.
@@ -1250,8 +1290,7 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
             search_method = getattr(
                 self, f"_search_{connections[qs.db].vendor}", self._search_fallback
             )
-            qs = search_method(qs, search_fields=search_fields,
-                               search_term=search_term)
+            qs = search_method(qs, search_fields=search_fields, search_term=search_term)
 
         # Paginate the queryset before mapping, since we don't know how big the
         # queryset could be.
@@ -1263,8 +1302,7 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
         # Parse the search response and map each result to a Select2-compatible
         # dict with an "id" and a "text" property.
         for instance in raw_results:
-            results.append(self.result_from_instance(
-                instance, mapping=mapping))
+            results.append(self.result_from_instance(instance, mapping=mapping))
 
         return results, has_more
 
@@ -1288,13 +1326,11 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
                 continue
             expression_fields.update(get_expression_fields(expr))
 
-        instance_json = {f: getattr(instance, f, None)
-                         for f in expression_fields}
+        instance_json = {f: getattr(instance, f, None) for f in expression_fields}
 
         result_text = str(jp(mapping["text"], instance_json))
         result_value = jp(mapping["value"], instance_json, default=result_text)
-        result_extra = {k: jp(v, instance_json)
-                        for k, v in mapping["extra"].items()}
+        result_extra = {k: jp(v, instance_json) for k, v in mapping["extra"].items()}
 
         mapped_result = {
             "value": result_value,
@@ -1349,8 +1385,7 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
         for field_name in search_fields:
             strict_score_field = F(f"_{field_name}_strict_score")
             similarity_score_field = F(f"_{field_name}_similarity_score")
-            search_rank_fields.update(
-                [strict_score_field, similarity_score_field])
+            search_rank_fields.update([strict_score_field, similarity_score_field])
 
             # Annotate the queryset with "strict" and "similarity" scores for
             # each field.
@@ -1366,10 +1401,8 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
                 **{
                     strict_score_field.name: Case(
                         When(**{f"{field_name}__iexact": search_term, "then": 3}),
-                        When(
-                            **{f"{field_name}__istartswith": search_term, "then": 2}),
-                        When(
-                            **{f"{field_name}__icontains": search_term, "then": 1}),
+                        When(**{f"{field_name}__istartswith": search_term, "then": 2}),
+                        When(**{f"{field_name}__icontains": search_term, "then": 1}),
                         output_field=model_fields.IntegerField(),
                         default=0,
                     ),
@@ -1441,10 +1474,8 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
                 **{
                     strict_score_field.name: Case(
                         When(**{f"{field_name}__iexact": search_term, "then": 3}),
-                        When(
-                            **{f"{field_name}__istartswith": search_term, "then": 2}),
-                        When(
-                            **{f"{field_name}__icontains": search_term, "then": 1}),
+                        When(**{f"{field_name}__istartswith": search_term, "then": 2}),
+                        When(**{f"{field_name}__icontains": search_term, "then": 1}),
                         output_field=model_fields.IntegerField(),
                         default=0,
                     ),

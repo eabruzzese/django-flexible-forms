@@ -16,6 +16,7 @@ from typing import (
     Type,
     TypeVar,
     Union,
+    cast,
 )
 
 import jmespath
@@ -24,7 +25,11 @@ from django.db.backends.base.base import BaseDatabaseWrapper
 from django.template import Context, Template
 from django.template.base import VariableNode
 from jmespath.parser import Parser
-from simpleeval import DEFAULT_FUNCTIONS, DEFAULT_OPERATORS, EvalWithCompoundTypes
+from simpleeval import (
+    DEFAULT_FUNCTIONS,
+    DEFAULT_OPERATORS,
+    EvalWithCompoundTypes,
+)
 
 if TYPE_CHECKING:  # pragma: no cover
     from flexible_forms.models import (
@@ -145,7 +150,7 @@ def replace_element(
     return elements
 
 
-def stable_json(data: Union[dict, list]) -> str:
+def stable_json(data: Union[dict, list, None]) -> str:
     """Generate a stable string representation of the given dict or list.
 
     Args:
@@ -220,18 +225,18 @@ class NOT_PROVIDED:
 class RenderedString(str):
     """A string with an attribute containing the render context.
 
-    The __context__ property will be a dict containing the keys of the variables
-    used to render the string. Variables in the original context that were not
-    used to render the string will be excluded. Variables that were referenced
-    in the string but not provided in the context should use the NOT_PROVIDED
-    proxy value.
+    The __context__ property will be a dict containing the keys of the
+    variables used to render the string. Variables in the original
+    context that were not used to render the string will be excluded.
+    Variables that were referenced in the string but not provided in the
+    context should use the NOT_PROVIDED proxy value.
     """
 
     __context__: Dict[str, Any]
 
 
 @singledispatch
-def interpolate(data: Any, context: Dict[str, Any], strict=True) -> Any:
+def interpolate(data: Any, context: Dict[str, Any], strict: bool = True) -> Any:
     """Interpolate the given data using DTL.
 
     Handles (nested) dicts and lists and will interpolate strings containing DTL tokens.
@@ -239,8 +244,8 @@ def interpolate(data: Any, context: Dict[str, Any], strict=True) -> Any:
     Args:
         data: The data to be interpolated.
         context: The context with which to interpolate strings containing DTL tokens.
-        strict: When True, an exception will be raised if the data
-            references a variable that is not provided in the context.
+        strict: If true, throws an error when the data references a variable
+            that is not available in the context.
 
     Returns:
         Any: The interpolated data.
@@ -250,7 +255,9 @@ def interpolate(data: Any, context: Dict[str, Any], strict=True) -> Any:
 
 
 @interpolate.register(str)
-def _interpolate_str(data: str, context: Dict[str, Any], strict=True) -> RenderedString:
+def _interpolate_str(
+    data: str, context: Dict[str, Any], strict: bool = True
+) -> RenderedString:
     """Handles interpolation of string values.
 
     Interpolates strings using the default Django Template Language engine.
@@ -258,6 +265,12 @@ def _interpolate_str(data: str, context: Dict[str, Any], strict=True) -> Rendere
     Args:
         data: The data to be interpolated.
         context: The context with which to interpolate strings containing DTL tokens.
+        strict: If True, throws an error when the data references a variable
+            that is not available in the context.
+
+    Raises:
+        LookupError: if strict is True and the data references a variable that
+            is not available in the context.
 
     Returns:
         RenderedString: The rendered string with a __context__ property
@@ -281,17 +294,20 @@ def _interpolate_str(data: str, context: Dict[str, Any], strict=True) -> Rendere
     # Attach the render context to the string.
     rendered_string.__context__ = rendered_context
 
-    missing_variables = frozenset(k for k, v in rendered_context.items() if v is NOT_PROVIDED)
+    missing_variables = frozenset(
+        k for k, v in rendered_context.items() if v is NOT_PROVIDED
+    )
     if strict and missing_variables:
         raise LookupError(
-            f'The template references variables that were not in the context '
-            f'provided: {", ".join(missing_variables)}')
+            f"The template references variables that were not in the context "
+            f'provided: {", ".join(missing_variables)}'
+        )
 
     return rendered_string
 
 
 @interpolate.register(dict)
-def _interpolate_dict(data: dict, context: Dict[str, Any], strict=True) -> dict:
+def _interpolate_dict(data: dict, context: Dict[str, Any], strict: bool = True) -> dict:
     """Handles interpolation of dict values.
 
     Interpolates the values of the dict as appropriate (renders strings, or
@@ -300,6 +316,8 @@ def _interpolate_dict(data: dict, context: Dict[str, Any], strict=True) -> dict:
     Args:
         data: The data to be interpolated.
         context: The context with which to interpolate strings containing DTL tokens.
+        strict: If True, throws an error when the data references a variable
+            that is not available in the context.
 
     Returns:
         dict: The interpolated dict.
@@ -308,7 +326,7 @@ def _interpolate_dict(data: dict, context: Dict[str, Any], strict=True) -> dict:
 
 
 @interpolate.register(list)
-def _interpolate_list(data: list, context: Dict[str, Any], strict=True) -> list:
+def _interpolate_list(data: list, context: Dict[str, Any], strict: bool = True) -> list:
     """Handles interpolation of list values.
 
     Interpolates the elements of the list as appropriate (renders strings, or
@@ -317,6 +335,8 @@ def _interpolate_list(data: list, context: Dict[str, Any], strict=True) -> list:
     Args:
         data: The list to be interpolated.
         context: The context with which to interpolate strings containing DTL tokens.
+        strict: If True, throws an error when the data references a variable
+            that is not available in the context.
 
     Returns:
         list: The interpolated list.
@@ -352,16 +372,16 @@ def check_supports_pg_trgm(connection: BaseDatabaseWrapper) -> bool:
         return False
 
 
-def collect_annotations(obj: Type) -> Dict[str, Type]:
-    """Collects annotations from an object hierarchy."""
-    annotations = getattr(obj, "__annotations__", {})
-    for base in obj.__bases__:
-        annotations = {
-            **annotations,
-            **collect_annotations(base)
-        }
+def collect_annotations(cls: Type) -> Dict[str, Type]:
+    """Collects annotations from an object hierarchy.
+
+    Args:
+        cls: The class from which to extract property annotations.
+
+    Returns:
+        dict: A dict of each annotation's name and type.
+    """
+    annotations = cast(Dict[str, Type], getattr(cls, "__annotations__", {}))
+    for base in cls.__bases__:
+        annotations = {**annotations, **collect_annotations(base)}
     return annotations
-
-
-def make_autocomplete_option(value: Dict[str, Any]) -> str:
-    pass

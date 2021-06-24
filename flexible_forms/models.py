@@ -14,6 +14,7 @@ from typing import (
     Iterable,
     List,
     Mapping,
+    Match,
     Optional,
     Sequence,
     Set,
@@ -44,10 +45,13 @@ from django.dispatch.dispatcher import receiver
 from django.forms.widgets import Widget
 from django.utils.functional import cached_property
 from django.utils.text import slugify
-from flexible_forms.signals import pre_form_class_prepare, post_form_class_prepare
 from simpleeval import FunctionNotDefined, NameNotDefined
 
 from flexible_forms.fields import FIELD_TYPES, FieldType
+from flexible_forms.signals import (
+    post_form_class_prepare,
+    pre_form_class_prepare,
+)
 from flexible_forms.utils import (
     FormEvaluator,
     evaluate_expression,
@@ -55,9 +59,9 @@ from flexible_forms.utils import (
 )
 
 try:
-    from django.db.models import JSONField  # type: ignore
+    from django.db.models import JSONField
 except ImportError:  # pragma: no cover
-    from django.contrib.postgres.fields import JSONField
+    from django.contrib.postgres.fields import JSONField  # type: ignore
 
 # If we're only type checking, import things that would otherwise cause an
 # ImportError due to circular dependencies.
@@ -570,6 +574,18 @@ class BaseForm(FlexibleBaseModel):
         Returns:
             BaseRecordForm: A configured BaseRecordForm (a Django ModelForm instance).
         """
+        RecordModel = self._flexible_model_for(BaseRecord)
+        form_field_name = RecordModel.FlexibleMeta.form_field_name
+
+        # Exclude the "form" field if an alias is defined for it.
+        if form_field_name != "form":
+            exclude = (*exclude, "form")
+
+        # If we were given a record instance, we can exclude the form
+        # relationship and save ourselves a query during form validation.
+        if instance:
+            exclude = (*exclude, form_field_name)
+
         all_fields = tuple(f for f in self.fields.all() if f.name not in exclude)
 
         # Build a dict containing all field values. This combines all of the
@@ -588,8 +604,6 @@ class BaseForm(FlexibleBaseModel):
             f.name: f.as_form_field(field_values=field_values, record=instance)
             for f in all_fields
         }
-
-        RecordModel = self._flexible_model_for(BaseRecord)
 
         # Import the form class inline to prevent a circular import.
         from flexible_forms.forms import BaseRecordForm
@@ -637,7 +651,7 @@ class BaseForm(FlexibleBaseModel):
             form_class=form_class,
         )
 
-        initial = {"form": self, **(initial or {})}
+        initial = {form_field_name: self, **(initial or {})}
 
         # Create a form instance from the form class and the passed parameters.
         form_instance = form_class(
@@ -1190,7 +1204,7 @@ class BaseRecord(FlexibleBaseModel):
         return {f.name: f for f in self.form.fields.all()}
 
     @property
-    def _data(self) -> Mapping[str, Any]:
+    def _data(self) -> Dict[str, Any]:
         """Return a dict of Record attributes and their values.
 
         Returns:
@@ -1246,21 +1260,33 @@ class BaseRecord(FlexibleBaseModel):
 
         # HACK: Choice fields usually add a get_FIELDNAME_display method, which
         # we handle here by rendering the label from the value in _data.
-        display_method = re.match(r'^get_(?P<field_name>\w+)_display$', name)
+        display_method = re.match(r"^get_(?P<field_name>\w+)_display$", name)
         if display_method:
-            def _get_choice_display(self_=self, display_method=display_method) -> Optional[str]:
-                field_name = display_method.group('field_name')
+
+            def _get_choice_display(
+                self_: BaseRecord = self,
+                display_method: Match[str] = cast(Match[str], display_method),
+            ) -> Optional[str]:
+                field_name = display_method.group("field_name")
 
                 try:
-                    form_field = self_._fields[field_name].as_form_field(record=self_, field_values=self_._data)
-                    return next((label for value, label in form_field.choices if value == self_._data.get(field_name)), None)
+                    form_field = self_._fields[field_name].as_form_field(
+                        record=self_, field_values=self_._data
+                    )
+                    return next(
+                        (
+                            cast(str, label)
+                            for value, label in form_field.choices
+                            if value == self_._data.get(field_name)
+                        ),
+                        None,
+                    )
                 except (KeyError, AttributeError) as ex:
                     raise AttributeError(
                         f"'{self_.__class__.__name__}' object has no attribute '{name}'"
                     ) from ex
 
             return _get_choice_display
-
 
         raise AttributeError(
             f"'{self.__class__.__name__}' object has no attribute '{name}'"
@@ -1276,7 +1302,7 @@ class BaseRecord(FlexibleBaseModel):
         if (
             not self._initialized
             or name
-            in frozenset([*self.__dict__.keys(), *self.__class__.__dict__.keys(), 'pk'])
+            in frozenset([*self.__dict__.keys(), *self.__class__.__dict__.keys(), "pk"])
             or name.startswith("_")
         ):
             super().__setattr__(name, value)

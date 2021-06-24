@@ -173,7 +173,9 @@ def test_field_modifier() -> None:
 
     # The validation message should tell the user what's wrong, and include the
     # exception message.
-    assert "'>' not supported between instances of 'str' and 'int'" in str(ex.value.messages)
+    assert "'>' not supported between instances of 'str' and 'int'" in str(
+        ex.value.messages
+    )
     assert "expression is invalid" in error_message
 
 
@@ -422,13 +424,21 @@ def test_form_lifecycle() -> None:
     record_count = AppRecord.objects.count()
     unpersisted_record = django_form.save(commit=False)
     cleaned_record_data = django_form.cleaned_data
-    assert {**unpersisted_record._data, "uuid": None, "form": unpersisted_record.form} == cleaned_record_data
+    assert {
+        **unpersisted_record._data,
+        "uuid": None,
+        "app_form": unpersisted_record.app_form,
+    } == cleaned_record_data
     assert AppRecord.objects.count() == record_count
 
     # Saving the form with commit=True should produce the same result as
     # commit=False, but actually persist the changes to the database.
     persisted_record = django_form.save(commit=True)
-    assert {**persisted_record._data, "uuid": None, "form": persisted_record.form} == cleaned_record_data
+    assert {
+        **persisted_record._data,
+        "uuid": None,
+        "app_form": persisted_record.app_form,
+    } == cleaned_record_data
     assert AppRecord.objects.count() == record_count + 1
 
     # Recreating the form from the persisted record should produce a valid,
@@ -436,10 +446,9 @@ def test_form_lifecycle() -> None:
     same_form = persisted_record.as_django_form(field_values)
     assert same_form.initial == {
         **persisted_record._data,
-        "form": persisted_record.form,
-        "app_form": persisted_record.app_form,
         "id": persisted_record.id,
         "uuid": persisted_record.uuid,
+        "app_form": persisted_record.app_form,
     }
     assert same_form.is_valid(), same_form.errors
     assert not same_form.has_changed(), same_form.changed_data
@@ -472,13 +481,17 @@ def test_file_upload() -> None:
     django_form = form.as_django_form(files={file_field.name: uploaded_file})
 
     # The form should be valid, and saving it should produce a record.
-    assert django_form.is_valid(), django_form.errors
+    assert django_form.is_valid(), (
+        django_form.errors,
+        django_form.data,
+        django_form.initial,
+    )
     record = django_form.save()
     assert isinstance(record.file, File)
 
     # Setting the field to False should result in a null value when cleaned.
     django_form = form.as_django_form(files={file_field.name: False}, instance=record)
-    assert django_form.is_valid(), django_form.errors
+    assert django_form.is_valid(), (django_form.errors, django_form.data)
     record = django_form.save()
     assert record.file._file is None
 

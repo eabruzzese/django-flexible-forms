@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "nested_admin",
+    "django_ace",
     "debug_toolbar",
     "django_extensions",
     "flexible_forms",
@@ -139,4 +140,4 @@ DEBUG_TOOLBAR_CONFIG = {"SHOW_TOOLBAR_CALLBACK": lambda _: True}
 DATA_UPLOAD_MAX_NUMBER_FIELDS = None
 
 # Specify the default auto field for Django 3.2+
-DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
+DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
