@@ -577,14 +577,10 @@ class BaseForm(FlexibleBaseModel):
         RecordModel = self._flexible_model_for(BaseRecord)
         form_field_name = RecordModel.FlexibleMeta.form_field_name
 
-        # Exclude the "form" field if an alias is defined for it.
+        # Exclude the form relationships. Calling this method implies that they
+        # are already set, and they cannot be changed via normal means.
         if form_field_name != "form":
             exclude = (*exclude, "form")
-
-        # If we were given a record instance, we can exclude the form
-        # relationship and save ourselves a query during form validation.
-        if instance:
-            exclude = (*exclude, form_field_name)
 
         all_fields = tuple(f for f in self.fields.all() if f.name not in exclude)
 

@@ -613,8 +613,8 @@ def test_record_queries(django_assert_num_queries) -> None:
             assert record._data != {}
 
     # Validating an existing record against its Django form with no changes
-    # should require no additional queries.
-    with django_assert_num_queries(0):
+    # should require only the queries necessary to fetch the form structure.
+    with django_assert_num_queries(2):
         record = records[0]
         django_form = record.form.as_django_form(data={}, instance=record)
         assert django_form.is_valid(), django_form.errors
@@ -622,11 +622,12 @@ def test_record_queries(django_assert_num_queries) -> None:
     # Updating a record using a Django form should require these queries:
     #
     #   * A SAVEPOINT query before saving the model.
+    #   * Two queries to fetch the form structure for the record.
     #   * A single query to update the Record itself.
     #   * A single bulk_update query to update the attributes that have changed.
     #   * A RELEASE SAVEPOINT query after all of the queries have been executed.
     #
-    with django_assert_num_queries(4):
+    with django_assert_num_queries(6):
         record = records[1]
         new_record_values = {
             f"{SingleLineTextField.name}_field": "new_value",

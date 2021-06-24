@@ -83,12 +83,6 @@ def test_field_types(
                 forms.ModelForm, data.draw(from_form(type(quiz.as_django_form())))
             )
 
-        # django_form.files = {}
-        # for key, value in django_form.data.items():
-        #     if not isinstance(value, File):
-        #         continue
-        #     django_form.files[key]
-
         django_form.files = {
             k: v for k, v in django_form.data.items() if isinstance(v, File)
         }

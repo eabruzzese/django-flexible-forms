@@ -534,26 +534,34 @@ class RecordsAdmin(FlexibleAdminMixin, ModelAdmin):
         If the form has a fieldset configuration, use it instead of the
         default.
         """
+        record_model = self.model._flexible_model_for(BaseRecord)
+        form_model = self.model._flexible_model_for(BaseForm)
+        form_field_name = record_model.FlexibleMeta.form_field_name
+        form_pk = request.GET.get(form_field_name)
+
         default_fieldsets = cast(
             List[Tuple[Optional[str], Dict[str, Any]]],
             super().get_fieldsets(request, obj),
         )
 
-        if obj is None:
-            return default_fieldsets
+        # Fieldsets starts out as the fieldsets Django builds by default.
+        fieldsets = default_fieldsets
 
-        record = cast("BaseRecord", obj)
-
-        # If the record's form specifies a fieldsets configuration, use it.
-        # Otherwise, default to Django admin behavior.
-        fieldsets = record.form.as_django_fieldsets() or default_fieldsets
+        if obj:
+            obj = cast("BaseRecord", obj)
+            fieldsets = obj.form.as_django_fieldsets() or default_fieldsets
+        # If a form is specified in the query parameters, we'll look it up and
+        # use its fieldset configuration until we have a record.
+        elif form_pk:
+            form_obj = cast(BaseForm, form_model.objects.get(pk=form_pk))
+            fieldsets = form_obj.as_django_fieldsets() or default_fieldsets
 
         if fieldsets is not default_fieldsets:
-            form = self.get_form(request, record)
+            form = self.get_form(request, obj)
             form_fields = frozenset(form.base_fields.keys())  # type: ignore
             record_fields = tuple(
                 f.name
-                for f in record._meta.get_fields(include_parents=True)
+                for f in self.model._meta.get_fields(include_parents=True)
                 if f.name in form_fields
             )
 
@@ -571,7 +579,7 @@ class RecordsAdmin(FlexibleAdminMixin, ModelAdmin):
     def get_form(
         self,
         request: HttpRequest,
-        obj: Optional["BaseRecord"] = None,
+        obj: Optional[models.Model] = None,
         *args: Any,
         **kwargs: Any,
     ) -> Type[forms.BaseForm]:
@@ -590,7 +598,7 @@ class RecordsAdmin(FlexibleAdminMixin, ModelAdmin):
         """
         if obj:
             return type(
-                obj.as_django_form(
+                cast(BaseRecord, obj).as_django_form(
                     data=request.POST,
                     files=request.FILES,
                 )
@@ -603,14 +611,18 @@ class RecordsAdmin(FlexibleAdminMixin, ModelAdmin):
 
         if form_pk:
             form = cast(BaseForm, form_model.objects.get(pk=form_pk))
-            initial_data: Dict[str, Any] = {
-                **{
-                    cast(str, f.name): request.GET.get(cast(str, f.name))
-                    for f in (*record_model._meta.get_fields(), *form.fields.all())
-                },
-                form_field_name: form,
-            }
-            return type(form.as_django_form(data=initial_data, initial=initial_data))
+            django_form = type(form.as_django_form())
+
+            # initial_values = {
+            #     cast(str, f.name): request.GET[cast(str, f.name)]
+            #     for f in (*record_model._meta.get_fields(), *form.fields.all())
+            #     if f.name in request.GET
+            #     and f.name not in (form_field_name,)
+            # }
+            # for field_name, initial_value in initial_values:
+            #     django_form.fields[field_name].initial = initial_value
+
+            return django_form
 
         # If no object was given and no form was specified, return a vanilla
         # model form for a BaseRecord.

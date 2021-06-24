@@ -8,6 +8,8 @@ import django
 from django import forms
 from django.core.files.base import File
 from django.forms.models import ALL_FIELDS
+from django.forms.widgets import HiddenInput
+from django.utils.datastructures import MultiValueDict
 
 from flexible_forms.cache import cache
 from flexible_forms.models import BaseForm, BaseRecord
@@ -92,13 +94,11 @@ class BaseRecordForm(forms.ModelForm):
             form = FormModel.objects.get(pk=form)
 
         # If the form is bound, make sure that data holds a reference to the
-        # form object.
+        # form object, and disable the form field.
         is_bound = data is not None or files is not None
         if is_bound:
-            data = {
-                **(data or {}),
-                form_field_name: form,
-            }
+            data = cast(Dict[str, Any], data or MultiValueDict())
+            data[form_field_name] = form
 
         # Inject the instance's _data (form field values) into the initial dict.
         # If we weren't given an instance, we make a new one (but don't persist
@@ -123,7 +123,7 @@ class BaseRecordForm(forms.ModelForm):
                 continue
 
             # If the field already has a value, don't try to overwrite it.
-            if field_name in {**(data or {}), **(files or {})}:
+            if field_name in (*(data or {}).keys(), *(files or {}).keys()):
                 continue
 
             # Set the initial value.
@@ -137,9 +137,11 @@ class BaseRecordForm(forms.ModelForm):
             # Set the appropriate data element (files for FileFields, data for
             # everything else) to the field's new value.
             if isinstance(field, forms.FileField):
-                files = {**(files or {}), field_name: field_value}
+                files = cast(Dict[str, File], files or MultiValueDict())
+                files.setdefault(field_name, field_value)
             else:
-                data = {**(data or {}), field_name: field_value}
+                data = cast(Dict[str, Any], data or MultiValueDict())
+                data.setdefault(field_name, field_value)
 
             # Unset the initial value so that the automatically-set value is
             # detected as a change when the form is saved.
@@ -159,6 +161,12 @@ class BaseRecordForm(forms.ModelForm):
         super().__init__(
             data=data, files=files, instance=instance, initial=initial, **kwargs
         )
+
+        # Hide and disable the form input if the form is already set.
+        if form is not None:
+            form_field = self.fields[form_field_name]
+            form_field.widget = HiddenInput()
+            form_field.disabled = True
 
         # Emit a signal after initializing the form.
         post_form_init.send(
