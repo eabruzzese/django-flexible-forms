@@ -7,9 +7,9 @@ on:
 
 jobs:
   release:
-    strategy:
-      matrix:
-        poetry-version: [1.1.6]
+    env:
+      PYTHON_VERSION: 3.9
+      POETRY_VERSION: 1.1.6
     name: Release
     runs-on: ubuntu-latest
     steps:
@@ -23,16 +23,16 @@ jobs:
           echo ::set-output name=tag::${GITHUB_REF#refs/tags/}
 
       # Set up Python.
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v2
         with:
-          python-version: "3.8"
+          python-version: "${{ env.PYTHON_VERSION }}"
 
       # Install and configure our dependencies.
       - name: Install poetry
         uses: abatilo/actions-poetry@v2.0.0
         with:
-          poetry-version: ${{ matrix.poetry-version }}
+          poetry-version: ${{ env.POETRY_VERSION }}
       - name: Upgrade pip
         shell: bash
         run: poetry run python -m pip install --upgrade pip
