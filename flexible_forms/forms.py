@@ -103,7 +103,7 @@ class BaseRecordForm(forms.ModelForm):
         # Inject the instance's _data (form field values) into the initial dict.
         # If we weren't given an instance, we make a new one (but don't persist
         # it) for consistency.
-        instance = instance or opts.model(form=form)
+        instance = instance or opts.model(**{form_field_name: form})
         initial = {
             **instance._data,
             **(initial or {}),
@@ -162,11 +162,14 @@ class BaseRecordForm(forms.ModelForm):
             data=data, files=files, instance=instance, initial=initial, **kwargs
         )
 
-        # Hide and disable the form input if the form is already set.
+        # Hide and disable the form input if the BaseRecord is already persisted
+        # with a relationship to its BaseForm.
         if form is not None:
             form_field = self.fields[form_field_name]
             form_field.widget = HiddenInput()
-            form_field.disabled = True
+            form_field.disabled = instance.pk and getattr(
+                instance, f"{form_field_name}_id", None
+            )
 
         # Emit a signal after initializing the form.
         post_form_init.send(
