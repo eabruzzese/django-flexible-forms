@@ -122,10 +122,6 @@ class BaseRecordForm(forms.ModelForm):
             except AttributeError:
                 continue
 
-            # If the field already has a value, don't try to overwrite it.
-            if field_name in (*(data or {}).keys(), *(files or {}).keys()):
-                continue
-
             # Set the initial value.
             initial[field_name] = field_value
 
@@ -134,14 +130,21 @@ class BaseRecordForm(forms.ModelForm):
             if not is_bound:
                 continue
 
+            files = cast(Dict[str, File], files or MultiValueDict())
+            data = cast(Dict[str, Any], data or MultiValueDict())
+            value = data.get(field_name, files.get(field_name))
+
+            # If the field was already assigned a non-empty value, don't try to
+            # overwrite it.
+            if value not in field.empty_values:
+                continue
+
             # Set the appropriate data element (files for FileFields, data for
             # everything else) to the field's new value.
             if isinstance(field, forms.FileField):
-                files = cast(Dict[str, File], files or MultiValueDict())
-                files.setdefault(field_name, field_value)
+                files[field_name] = field_value
             else:
-                data = cast(Dict[str, Any], data or MultiValueDict())
-                data.setdefault(field_name, field_value)
+                data[field_name] = field_value
 
             # Unset the initial value so that the automatically-set value is
             # detected as a change when the form is saved.
