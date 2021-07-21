@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import difflib
+import json
 from unittest.util import safe_repr
 
 import pytest
@@ -7,7 +8,7 @@ from django.forms.renderers import DjangoTemplates, Jinja2
 from django.test.html import parse_html
 from django.utils.datastructures import MultiValueDict
 
-from flexible_forms.utils import stable_json
+from flexible_forms.utils import create_autocomplete_value, stable_json
 from flexible_forms.widgets import (
     AutocompleteSelect,
     AutocompleteSelectMultiple,
@@ -111,8 +112,7 @@ def test_autocomplete_select_single_value_required() -> None:
     widget = AutocompleteSelect()
     widget.is_required = True
 
-    selected_value = {"value": "1", "text": "Test option", "extra": {}}
-    selected_option = stable_json({**selected_value, "id": stable_json(selected_value)})
+    selected_option = create_autocomplete_value(text="Test option", value="1")
 
     field_name = "test"
     field_value = [selected_option]
@@ -160,12 +160,9 @@ def test_autocomplete_select_single_value_freetext() -> None:
 
     field_name = "test"
     field_value = ["freetext option"]
-    selected_value = {
-        "text": "freetext option",
-        "value": "freetext option",
-        "extra": {},
-    }
-    selected_option = stable_json({**selected_value, "id": stable_json(selected_value)})
+    selected_option = create_autocomplete_value(
+        text="freetext option", value="freetext option"
+    )
 
     # The widget value is extracted from the submitted form data. It is always
     # a list of strings, where each string is a stable JSON representation of a
@@ -210,8 +207,8 @@ def test_autocomplete_select_multiple_value_required() -> None:
 
     field_name = "test"
     field_value = [
-        '{"id":"1","text":"Test option"}',
-        '{"id":"2","text":"Test option 2"}',
+        create_autocomplete_value(text="Test option", value="1"),
+        create_autocomplete_value(text="Test option 2", value="2"),
     ]
 
     # The widget value is extracted from the submitted form data. It is always
@@ -221,14 +218,9 @@ def test_autocomplete_select_multiple_value_required() -> None:
     widget_value = widget.value_from_datadict(
         data=form_data, files=None, name=field_name
     )
-    assert widget_value == stable_json(
-        [
-            {"id": "1", "text": "Test option"},
-            {"id": "2", "text": "Test option 2"},
-        ]
-    )
+    assert widget_value == stable_json([json.loads(v) for v in field_value])
 
-    expected_html = """
+    expected_html = f"""
     <select
         class="admin-autocomplete"
         data-ajax--cache="true"
@@ -243,8 +235,8 @@ def test_autocomplete_select_multiple_value_required() -> None:
         data-theme="admin-autocomplete"
         multiple
         name="test">
-    <option selected value='{"id":"1","text":"Test option"}'>Test option</option>
-    <option selected value='{"id":"2","text":"Test option 2"}'>Test option 2</option>
+    <option selected value='{field_value[0]}'>Test option</option>
+    <option selected value='{field_value[1]}'>Test option 2</option>
     </select>
     """
 

@@ -43,9 +43,13 @@ class BaseRecordForm(forms.ModelForm):
         files: Optional[Dict[str, File]] = None,
         instance: Optional["BaseRecord"] = None,
         initial: Optional[Mapping[str, Any]] = None,
+        prefix: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
         opts = self._meta  # type: ignore
+
+        # Set the prefix if we were given one (we'll need it for a modifier).
+        self.prefix = prefix
 
         # Ensure that data and files are both mutable so that signal handlers
         # can act before the form is initialized.
@@ -117,6 +121,8 @@ class BaseRecordForm(forms.ModelForm):
             k: v for k, v in self.base_fields.items() if hasattr(v, "_value")
         }
         for field_name, field in modified_fields.items():
+            field_name = self.add_prefix(field_name)
+
             try:
                 field_value = field._value  # type: ignore
             except AttributeError:

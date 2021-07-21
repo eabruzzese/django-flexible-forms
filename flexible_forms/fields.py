@@ -63,11 +63,11 @@ from flexible_forms.utils import (
     RenderedString,
     check_supports_pg_trgm,
     collect_annotations,
+    create_autocomplete_result,
     evaluate_expression,
     get_expression_fields,
     interpolate,
     jp,
-    stable_json,
 )
 
 logger = logging.getLogger(__name__)
@@ -1080,8 +1080,6 @@ class URLAutocompleteSelectField(BaseAutocompleteSelectField):
         raw_results = jp(mapping["root"], response_json, [])
         for raw_result in raw_results:
             result_text = str(jp(mapping["text"], raw_result))
-            result_value = jp(mapping["value"], raw_result, default=result_text)
-            result_extra = {k: jp(v, raw_result) for k, v in mapping["extra"].items()}
 
             # If we're configured to search manually, skip results that don't
             # have the search term in the extracted text.
@@ -1089,22 +1087,13 @@ class URLAutocompleteSelectField(BaseAutocompleteSelectField):
                 if search_term.casefold() not in result_text.casefold():
                     continue
 
-            mapped_result = {
-                "text": result_text,
-                "value": result_value,
-                "extra": result_extra,
-            }
-
-            # The "id" is the value eventually stored in the database. In this
-            # case, it is a stringified version of the result JSON so that it can
-            # be deserialized when rendering the initial value for the widget.
-            #
-            # The use of "id" as opposed to "value" or something that makes
-            # more semantic sense is to support the use of the select2
-            # implementation that ships with the Django admin.
-            mapped_result["id"] = stable_json(mapped_result)
-
-            results.append(cast(AutocompleteResult, mapped_result))
+            results.append(
+                create_autocomplete_result(
+                    text=result_text,
+                    value=jp(mapping["value"], raw_result),
+                    extra={k: jp(v, raw_result) for k, v in mapping["extra"].items()},
+                )
+            )
 
         # If we're configured to paginate manually, then paginate.
         paginator = Paginator(results, per_page)
@@ -1328,26 +1317,11 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
 
         instance_json = {f: getattr(instance, f, None) for f in expression_fields}
 
-        result_text = str(jp(mapping["text"], instance_json))
-        result_value = jp(mapping["value"], instance_json, default=result_text)
-        result_extra = {k: jp(v, instance_json) for k, v in mapping["extra"].items()}
-
-        mapped_result = {
-            "value": result_value,
-            "text": result_text,
-            "extra": result_extra,
-        }
-
-        # The "id" is the value eventually stored in the database. In this
-        # case, it is a stringified version of the result JSON so that it can
-        # be deserialized when rendering the initial value for the widget.
-        #
-        # The use of "id" as opposed to "value" or something that makes
-        # more semantic sense is to support the use of the select2
-        # implementation that ships with the Django admin.
-        mapped_result["id"] = stable_json(mapped_result)
-
-        return cast(AutocompleteResult, mapped_result)
+        return create_autocomplete_result(
+            text=str(jp(mapping["text"], instance_json)),
+            value=jp(mapping["value"], instance_json),
+            extra={k: jp(v, instance_json) for k, v in mapping["extra"].items()},
+        )
 
     def _search_postgresql(
         self,

@@ -32,23 +32,7 @@ from simpleeval import (
 )
 
 if TYPE_CHECKING:  # pragma: no cover
-    from flexible_forms.models import (
-        BaseField,
-        BaseFieldModifier,
-        BaseForm,
-        BaseRecord,
-        BaseRecordAttribute,
-    )
-
-    SwappableModel = Type[
-        Union[
-            BaseForm,
-            BaseField,
-            BaseFieldModifier,
-            BaseRecord,
-            BaseRecordAttribute,
-        ]
-    ]
+    from flexible_forms.fields import AutocompleteResult
 
 T = TypeVar("T", bound=Type)
 
@@ -385,3 +369,58 @@ def collect_annotations(cls: Type) -> Dict[str, Type]:
     for base in cls.__bases__:
         annotations = {**annotations, **collect_annotations(base)}
     return annotations
+
+
+def create_autocomplete_result(
+    text: str,
+    value: Any,
+    extra: Optional[Dict[str, Any]] = None,
+) -> "AutocompleteResult":
+    """Generate a valid value for an AutocompleteSelect field.
+
+    The AutocompleteSelect field types require options to be structured in a
+    specific way in order to optimize subsequent renders: the entire
+    autocomplete result is serialized as JSON in the ID field to prevent
+    unnecessary lookups when rendering an existing value into a form.
+
+    Args:
+        text: The displayed text of the autocomplete option.
+        value: The unique value assigned to the option.
+        extra: Additional data stored along with the option.
+
+    Returns:
+        AutocompleteResult: A valid autocomplete result dict.
+    """
+    result = {
+        "text": text,
+        "value": text if value is None else value,
+        "extra": extra or {},
+    }
+
+    # The "id" is the value eventually stored in the database. In this
+    # case, it is a stringified version of the result JSON so that it can
+    # be deserialized when rendering the initial value for the widget.
+    #
+    # The use of "id" as opposed to "value" or something that makes
+    # more semantic sense is to support the use of the select2
+    # implementation that ships with the Django admin.
+    result["id"] = stable_json(result)
+
+    return cast("AutocompleteResult", result)
+
+
+def create_autocomplete_value(*args: Any, **kwargs: Any) -> str:
+    """Return a stabilized JSON string of an autocomplete result.
+
+    Acts as a thin wrapper for create_autocomplete_result.
+
+    Args:
+        args: Args passed to create_autocomplete_result
+        kwargs: Kwargs passed to create_autocomplete_result
+
+    Returns:
+        str: A stabilized JSON string of the autocomplete result.
+    """
+    return stable_json(
+        cast(Dict[str, Any], create_autocomplete_result(*args, **kwargs))
+    )
