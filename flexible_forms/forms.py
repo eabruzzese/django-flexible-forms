@@ -2,10 +2,11 @@
 """Forms that power the flexible_forms module."""
 
 import datetime
-from typing import Any, Dict, Mapping, Optional, cast
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, cast
 
 import django
 from django import forms
+from django.core.exceptions import ValidationError
 from django.core.files.base import File
 from django.forms.models import ALL_FIELDS
 from django.forms.widgets import HiddenInput
@@ -186,6 +187,24 @@ class BaseRecordForm(forms.ModelForm):
             form=self,
         )
 
+    def _handle_clean_responses(self, responses: Iterable[Callable, Any]) -> None:
+        """Handle ValidationErrors for clean-related signals.
+
+        Each signal receiver can return a response or raise an error. If the
+        receiver returns or raises a ValidationError, it will be added to the
+        form's errors dict. All other exceptions will be re-raised, and
+        non-exception responses are ignored.
+
+        Args:
+            responses: An iterable of (receiver, response) tuples.
+        """
+        for _, response in responses:
+            if not isinstance(response, BaseException):
+                continue
+            if isinstance(response, ValidationError):
+                self.add_error(None, response)
+            raise response
+
     def full_clean(self) -> None:
         """Perform a full clean of the form.
 
@@ -193,7 +212,9 @@ class BaseRecordForm(forms.ModelForm):
         from validation if it's already set (to eliminate database
         queries related to the schema lookup).
         """
-        pre_form_clean.send(sender=self.__class__, form=self)
+        self._handle_clean_responses(
+            pre_form_clean.send_robust(sender=self.__class__, form=self)
+        )
 
         super().full_clean()
 
@@ -221,8 +242,10 @@ class BaseRecordForm(forms.ModelForm):
             timeout=None,
         )
 
-        post_form_clean.send(
-            sender=self.__class__, form=self, field_values=field_values
+        self._handle_clean_responses(
+            post_form_clean.send_robust(
+                sender=self.__class__, form=self, field_values=field_values
+            )
         )
 
     def clean(self) -> Dict[str, Any]:
