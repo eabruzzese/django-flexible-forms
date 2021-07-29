@@ -704,6 +704,25 @@ class BaseField(FlexibleBaseModel):
         encoder=DjangoJSONEncoder,
     )
 
+    error_messages = JSONField(
+        blank=True,
+        null=True,
+        default={},
+        help_text="Custom validation error messages.",
+    )
+
+    localize = models.BooleanField(
+        blank=True,
+        default=False,
+        help_text="If True, enables localization support for this field."
+    )
+
+    disabled = models.BooleanField(
+        blank=True,
+        default=False,
+        help_text="If True, disables the field. Only really useful when used with a modifier to enable the field dynamically."
+    )
+
     field_type = models.TextField(
         choices=FIELD_TYPE_OPTIONS,
         help_text="The form widget to use when displaying the field.",
