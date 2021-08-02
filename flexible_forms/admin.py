@@ -571,7 +571,7 @@ class RecordsAdmin(FlexibleAdminMixin, ModelAdmin):
             if record_fields:
                 fieldsets = [
                     *fieldsets,
-                    ("Metadata", {"fields": record_fields}),
+                    ("METADATA", {"fields": record_fields}),
                 ]
 
         return fieldsets
