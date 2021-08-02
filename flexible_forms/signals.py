@@ -5,6 +5,10 @@ from django.dispatch import Signal
 pre_form_class_prepare = Signal()
 post_form_class_prepare = Signal()
 
+# Signals emitted before and after building the fieldsets for a BaseForm.
+pre_fieldsets_prepare = Signal()
+post_fieldsets_prepare = Signal()
+
 # Signals emitted before and after initializing a Record form.
 pre_form_init = Signal()
 post_form_init = Signal()

@@ -549,7 +549,7 @@ class RecordsAdmin(FlexibleAdminMixin, ModelAdmin):
 
         if obj:
             obj = cast("BaseRecord", obj)
-            fieldsets = obj.form.as_django_fieldsets() or default_fieldsets
+            fieldsets = obj.as_django_fieldsets() or default_fieldsets
         # If a form is specified in the query parameters, we'll look it up and
         # use its fieldset configuration until we have a record.
         elif form_pk:

@@ -21,6 +21,7 @@ from typing import (
     Tuple,
     Type,
     TypeVar,
+    TypedDict,
     Union,
     cast,
 )
@@ -51,6 +52,8 @@ from flexible_forms.fields import FIELD_TYPES, FieldType
 from flexible_forms.signals import (
     post_form_class_prepare,
     pre_form_class_prepare,
+    pre_fieldsets_prepare,
+    post_fieldsets_prepare,
 )
 from flexible_forms.utils import (
     FormEvaluator,
@@ -447,6 +450,17 @@ def register_flexible_model(sender: Type[models.Model], **kwargs: Any) -> None:
     sender.flexible_forms.register_model(sender)
 
 
+class _DjangoFieldsetOpts(TypedDict):
+    fields: Sequence[Union[str, Sequence[str]]]
+
+class DjangoFieldsetOpts(_DjangoFieldsetOpts, total=False):
+    description: Optional[str]
+    classes: Sequence[str]
+
+
+DjangoFieldset = Tuple[Optional[str], DjangoFieldsetOpts]
+
+
 class BaseForm(FlexibleBaseModel):
     """A model representing a single type of customizable form."""
 
@@ -494,9 +508,7 @@ class BaseForm(FlexibleBaseModel):
             "form": self,
         }
 
-    def as_django_fieldsets(
-        self,
-    ) -> List[Tuple[Optional[str], Dict[str, Any]]]:
+    def as_django_fieldsets(self) -> Sequence[DjangoFieldset]:
         """Generate a Django fieldsets configuration for the form.
 
         The Django admin supports the specification of fieldsets -- a
@@ -504,6 +516,8 @@ class BaseForm(FlexibleBaseModel):
         """
         django_fieldsets: List[Tuple[Optional[str], Dict[str, Any]]] = []
         fieldsets = self.fieldsets.all()
+
+        pre_fieldsets_prepare.send(sender=self.__class__, instance=self)
 
         seen_fields = set()
         for fieldset in fieldsets:
@@ -548,6 +562,12 @@ class BaseForm(FlexibleBaseModel):
                     },
                 ),
             ]
+
+        post_fieldsets_prepare.send(
+            sender=self.__class__,
+            instance=self,
+            fieldsets=django_fieldsets,
+        )
 
         return django_fieldsets
 
@@ -707,7 +727,7 @@ class BaseField(FlexibleBaseModel):
     error_messages = JSONField(
         blank=True,
         null=True,
-        default={},
+        default=dict,
         help_text="Custom validation error messages.",
     )
 
@@ -1190,6 +1210,22 @@ class BaseRecord(FlexibleBaseModel):
         super().__init__(*args, **kwargs)
         self._unsaved_changes = {}
         self._initialized = True
+
+    def as_django_fieldsets(self, *args: Any, **kwargs: Any) -> Sequence[DjangoFieldset]:
+        """Generate Django fieldsets from the BaseRecord instance.
+
+        Args:
+            args: Passed to super.
+            kwargs: Passed to super.
+
+        Returns:
+            Sequence[DjangoFieldset]: Django-compatible fieldsets for the instance.
+        """
+        pre_fieldsets_prepare.send(sender=self.__class__, instance=self)
+        django_fieldsets = self.form.as_django_fieldsets(*args, **kwargs)
+        post_fieldsets_prepare.send(sender=self.__class__, instance=self, django_fieldsets=django_fieldsets)
+
+        return django_fieldsets
 
     def as_django_form(self, *args: Any, **kwargs: Any) -> "BaseRecordForm":
         """Create a Django form from the record.
