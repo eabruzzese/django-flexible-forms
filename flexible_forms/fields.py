@@ -536,6 +536,16 @@ class DecimalField(FieldType):
     model_field_options = {"max_digits": 15, "decimal_places": 6}
 
 
+class FloatField(FieldType):
+    """A field for collecting decimal number values."""
+
+    label = "Floating-point Number"
+
+    form_field_class = form_fields.FloatField
+    form_widget_class = form_widgets.NumberInput
+    model_field_class = model_fields.FloatField
+
+
 class DateField(FieldType):
     """A field for collecting date data."""
 
