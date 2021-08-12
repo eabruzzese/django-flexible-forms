@@ -589,7 +589,11 @@ class DateField(FieldType):
         Returns:
             form_widgets.Widget: The configured form widget for the field.
         """
-        attrs = {**self.form_widget_options, **form_widget_options}.get("attrs", {})
+        attrs = {
+            **self.form_widget_options,
+            **self.field.form_widget_options,
+            **form_widget_options
+        }.get("attrs", {})
 
         if not self.allow_past:
             attrs["min"] = date.today().isoformat()
