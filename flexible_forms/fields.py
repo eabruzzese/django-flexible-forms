@@ -1223,8 +1223,8 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
 
         Raises:
             ImproperlyConfigured: If the configured search_field is not a
-                concrete field on the configured model (i.e. the field
-                doesn't exist or is a property method, etc).
+                field on the configured model (i.e. the field doesn't exist or
+                is a property method, etc).
         """
         results = cast(List[AutocompleteResult], [])
         has_more = False
@@ -1250,8 +1250,8 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
         # Resolve the model class from the Django registry and build a queryset
         # with the given parameters.
         model_cls = cast(Type[DjangoModel], apps.get_model(model_name))
-        concrete_model_fields = frozenset(
-            [*(f.name for f in model_cls._meta.concrete_fields), "pk"]
+        model_fields = frozenset(
+            [*(f.name for f in model_cls._meta.get_fields()), "pk"]
         )
         qs = (
             model_cls._default_manager.filter(**(filter or {}))
@@ -1266,16 +1266,16 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
             tuple(
                 field_name
                 for field_name in get_expression_fields(mapping["text"])
-                if field_name in concrete_model_fields
+                if field_name in model_fields
             ),
         )
 
-        # If any of the search_fields is not a concrete model field, it can't be
+        # If any of the search_fields is not a model field, it can't be
         # used to filter results.
-        if any(f not in concrete_model_fields for f in search_fields):
+        if any(f.split('__')[0] not in model_fields for f in search_fields):
             raise ImproperlyConfigured(
                 f"The search_fields option for {self.name} fields "
-                f"must contain only the names of concrete model fields."
+                f"must contain only the names of model fields."
             )
 
         # If no fields were specified to search, log a warning.
@@ -1294,6 +1294,9 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
                 self, f"_search_{connections[qs.db].vendor}", self._search_fallback
             )
             qs = search_method(qs, search_fields=search_fields, search_term=search_term)
+
+        # Return distinct records (in case filters cause duplicates).
+        qs = qs.distinct()
 
         # Paginate the queryset before mapping, since we don't know how big the
         # queryset could be.
@@ -1329,7 +1332,10 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
                 continue
             expression_fields.update(get_expression_fields(expr))
 
-        instance_json = {f: getattr(instance, f, None) for f in expression_fields}
+        instance_json = {}
+        for expression_field in expression_fields:
+            value = getattr(instance, expression_field, None)
+            instance_json[expression_field] = str(value() if callable(value) else value)
 
         return create_autocomplete_result(
             text=str(jp(mapping["text"], instance_json)),

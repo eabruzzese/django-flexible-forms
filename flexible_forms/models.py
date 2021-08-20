@@ -1106,7 +1106,7 @@ class BaseFieldsetItem(FlexibleBaseModel):
 
     class FlexibleMeta:
         field_field_name = "field"
-        field_field_related_name = "fieldset_items"
+        field_field_related_name = "fieldset_item"
         fieldset_field_name = "fieldset"
         fieldset_field_related_name = "items"
 
