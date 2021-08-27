@@ -154,4 +154,4 @@ repos:
         pass_filenames: false
         require_serial: true
         additional_dependencies:
-          - dephell[full]==0.7.9
+          - https://github.com/rigetti/dephell/archive/refs/heads/master.zip#egg=dephell[full]
