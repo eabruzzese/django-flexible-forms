@@ -271,11 +271,14 @@ class FieldType(metaclass=FieldTypeMetaclass):
         #
         form_field_options = {
             **self.form_field_options,
-            "required": self.field.required,
             "label": self.field.label,
             "label_suffix": self.field.label_suffix,
-            "initial": self.field.initial,
             "help_text": self.field.help_text,
+            "required": self.field.required,
+            "initial": self.field.initial,
+            "error_messages": self.field.error_messages,
+            "localize": self.field.localize,
+            "disabled": self.field.disabled,
             **self.field.form_field_options,
             **form_field_options,
         }
