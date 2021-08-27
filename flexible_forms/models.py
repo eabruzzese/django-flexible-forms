@@ -1526,11 +1526,16 @@ class BaseRecordAttribute(FlexibleBaseModel):
 # storage by creating a column of an appropriate datatype for each supported
 # field.
 #
-for field_type_name, field_type in sorted(FIELD_TYPES.items(), key=lambda f: f[0]):
-    BaseRecordAttribute.add_to_class(
-        BaseRecordAttribute.get_value_field_name(field_type_name),
-        field_type.as_model_field(blank=True, null=True, default=None),
-    )
+@receiver(class_prepared)
+def update_record_attribute_model(sender: Type[models.Model], **kwargs: Any) -> None:
+    if not issubclass(sender, BaseRecordAttribute):
+        return
+
+    for field_type_name, field_type in sorted(FIELD_TYPES.items(), key=lambda f: f[0]):
+        sender.add_to_class(
+            sender.get_value_field_name(field_type_name),
+            field_type.as_model_field(blank=True, null=True, default=None),
+        )
 
 
 class FlexibleForms:
