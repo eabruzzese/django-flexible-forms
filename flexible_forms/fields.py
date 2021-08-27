@@ -513,7 +513,7 @@ class IntegerField(FieldType):
     form_field_class = form_fields.IntegerField
     form_field_options = {"min_value": -2147483648, "max_value": 2147483647}
     form_widget_class = form_widgets.NumberInput
-    form_widget_options = {"attrs": {"step": {"1"}}}
+    form_widget_options = {"attrs": {"step": "1"}}
     model_field_class = model_fields.IntegerField
 
 
@@ -525,7 +525,7 @@ class PositiveIntegerField(FieldType):
     form_field_class = form_fields.IntegerField
     form_field_options = {"min_value": 1, "max_value": 2147483647}
     form_widget_class = form_widgets.NumberInput
-    form_widget_options = {"attrs": {"step": {"1"}}}
+    form_widget_options = {"attrs": {"step": "1"}}
     model_field_class = model_fields.PositiveIntegerField
 
 
@@ -537,7 +537,7 @@ class DecimalField(FieldType):
     form_field_class = form_fields.DecimalField
     form_field_options = {"max_digits": 15, "decimal_places": 6}
     form_widget_class = form_widgets.NumberInput
-    form_widget_options = {"attrs": {"step": {"0.01"}}}
+    form_widget_options = {"attrs": {"step": "0.01"}}
     model_field_class = model_fields.DecimalField
     model_field_options = {"max_digits": 15, "decimal_places": 6}
 
@@ -549,7 +549,7 @@ class FloatField(FieldType):
 
     form_field_class = form_fields.FloatField
     form_widget_class = form_widgets.NumberInput
-    form_widget_options = {"attrs": {"step": {"0.1"}}}
+    form_widget_options = {"attrs": {"step": "0.1"}}
     model_field_class = model_fields.FloatField
 
 
@@ -599,7 +599,7 @@ class DateField(FieldType):
         attrs = {
             **self.form_widget_options,
             **self.field.form_widget_options,
-            **form_widget_options
+            **form_widget_options,
         }.get("attrs", {})
 
         if not self.allow_past:
@@ -1279,7 +1279,7 @@ class QuerysetAutocompleteSelectField(BaseAutocompleteSelectField):
 
         # If any of the search_fields is not a model field, it can't be
         # used to filter results.
-        if any(f.split('__')[0] not in model_fields for f in search_fields):
+        if any(f.split("__")[0] not in model_fields for f in search_fields):
             raise ImproperlyConfigured(
                 f"The search_fields option for {self.name} fields "
                 f"must contain only the names of model fields."

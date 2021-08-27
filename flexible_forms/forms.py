@@ -2,7 +2,7 @@
 """Forms that power the flexible_forms module."""
 
 import datetime
-from typing import Any, Callable, Dict, Iterable, Mapping, Optional, cast
+from typing import Any, Dict, Mapping, Optional, cast
 
 import django
 from django import forms

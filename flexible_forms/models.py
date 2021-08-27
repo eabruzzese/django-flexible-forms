@@ -20,8 +20,8 @@ from typing import (
     Set,
     Tuple,
     Type,
-    TypeVar,
     TypedDict,
+    TypeVar,
     Union,
     cast,
 )
@@ -50,10 +50,10 @@ from simpleeval import FunctionNotDefined, NameNotDefined
 
 from flexible_forms.fields import FIELD_TYPES, FieldType
 from flexible_forms.signals import (
-    post_form_class_prepare,
-    pre_form_class_prepare,
-    pre_fieldsets_prepare,
     post_fieldsets_prepare,
+    post_form_class_prepare,
+    pre_fieldsets_prepare,
+    pre_form_class_prepare,
 )
 from flexible_forms.utils import (
     FormEvaluator,
@@ -451,9 +451,14 @@ def register_flexible_model(sender: Type[models.Model], **kwargs: Any) -> None:
 
 
 class _DjangoFieldsetOpts(TypedDict):
+    """Required configuration for a Django fieldset."""
+
     fields: Sequence[Union[str, Sequence[str]]]
 
+
 class DjangoFieldsetOpts(_DjangoFieldsetOpts, total=False):
+    """Optional configuration for a Django fieldset."""
+
     description: Optional[str]
     classes: Sequence[str]
 
@@ -514,7 +519,7 @@ class BaseForm(FlexibleBaseModel):
         The Django admin supports the specification of fieldsets -- a
         simple way of grouping fields together. This property builds
         """
-        django_fieldsets: List[Tuple[Optional[str], Dict[str, Any]]] = []
+        django_fieldsets: Sequence[DjangoFieldset] = []
         fieldsets = self.fieldsets.all()
 
         pre_fieldsets_prepare.send(sender=self.__class__, instance=self)
@@ -734,13 +739,13 @@ class BaseField(FlexibleBaseModel):
     localize = models.BooleanField(
         blank=True,
         default=False,
-        help_text="If True, enables localization support for this field."
+        help_text="If True, enables localization support for this field.",
     )
 
     disabled = models.BooleanField(
         blank=True,
         default=False,
-        help_text="If True, disables the field. Only really useful when used with a modifier to enable the field dynamically."
+        help_text="If True, disables the field. Only really useful when used with a modifier to enable the field dynamically.",
     )
 
     field_type = models.TextField(
@@ -1211,19 +1216,17 @@ class BaseRecord(FlexibleBaseModel):
         self._unsaved_changes = {}
         self._initialized = True
 
-    def as_django_fieldsets(self, *args: Any, **kwargs: Any) -> Sequence[DjangoFieldset]:
+    def as_django_fieldsets(self) -> Sequence[DjangoFieldset]:
         """Generate Django fieldsets from the BaseRecord instance.
-
-        Args:
-            args: Passed to super.
-            kwargs: Passed to super.
 
         Returns:
             Sequence[DjangoFieldset]: Django-compatible fieldsets for the instance.
         """
         pre_fieldsets_prepare.send(sender=self.__class__, instance=self)
-        django_fieldsets = self.form.as_django_fieldsets(*args, **kwargs)
-        post_fieldsets_prepare.send(sender=self.__class__, instance=self, django_fieldsets=django_fieldsets)
+        django_fieldsets = self.form.as_django_fieldsets()
+        post_fieldsets_prepare.send(
+            sender=self.__class__, instance=self, django_fieldsets=django_fieldsets
+        )
 
         return django_fieldsets
 
@@ -1519,16 +1522,22 @@ class BaseRecordAttribute(FlexibleBaseModel):
     value = property(_get_value, _set_value)
 
 
-##
-# Add individual fields for each supported datatype to BaseRecordAttribute.
-#
-# The EAV pattern used for storing form submissions (Records) achieves lossless
-# storage by creating a column of an appropriate datatype for each supported
-# field.
-#
 @receiver(class_prepared)
 def update_record_attribute_model(sender: Type[models.Model], **kwargs: Any) -> None:
-    if not issubclass(sender, BaseRecordAttribute):
+    """Add model fields for every FieldType to BaseRecordAttribute.
+
+    The EAV pattern used for storing form submissions (Records) achieves lossless
+    storage by creating a column of an appropriate datatype for each supported
+    field.
+
+    Args:
+        sender: The model class that was prepared.
+        kwargs: Unused, but required.
+    """
+    # If the sender isn't a BaseRecordAttribute, or the sender is an abstract
+    # model, noop; we only want to operate on concrete models that inherit from
+    # BaseRecordAttribute.
+    if not issubclass(sender, BaseRecordAttribute) or sender._meta.abstract:
         return
 
     for field_type_name, field_type in sorted(FIELD_TYPES.items(), key=lambda f: f[0]):

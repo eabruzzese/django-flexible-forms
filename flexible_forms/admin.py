@@ -4,18 +4,7 @@
 
 import json
 import logging
-from typing import (
-    Any,
-    Dict,
-    Iterable,
-    List,
-    Mapping,
-    Optional,
-    Sequence,
-    Tuple,
-    Type,
-    cast,
-)
+from typing import Any, Iterable, Mapping, Optional, Sequence, Type, cast
 
 from django import forms
 from django.conf import settings
@@ -34,6 +23,7 @@ from flexible_forms.models import (
     BaseFieldsetItem,
     BaseForm,
     BaseRecord,
+    DjangoFieldset,
     FlexibleBaseModel,
     JSONField,
 )
@@ -528,7 +518,7 @@ class RecordsAdmin(FlexibleAdminMixin, ModelAdmin):
         self,
         request: HttpRequest,
         obj: Optional[models.Model] = None,
-    ) -> List[Tuple[Optional[str], Dict[str, Any]]]:
+    ) -> Sequence[DjangoFieldset]:
         """Return the fieldset configuration for the form.
 
         If the form has a fieldset configuration, use it instead of the
@@ -540,7 +530,7 @@ class RecordsAdmin(FlexibleAdminMixin, ModelAdmin):
         form_pk = request.GET.get(form_field_name)
 
         default_fieldsets = cast(
-            List[Tuple[Optional[str], Dict[str, Any]]],
+            Sequence[DjangoFieldset],
             super().get_fieldsets(request, obj),
         )
 
